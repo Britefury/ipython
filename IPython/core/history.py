@@ -28,7 +28,6 @@ import threading
 
 # Our own packages
 from IPython.config.configurable import Configurable
-from IPython.external.decorator import decorator
 from IPython.utils.decorators import undoc
 from IPython.utils.path import locate_profile
 from IPython.utils import py3compat
@@ -59,13 +58,19 @@ class DummyDB(object):
         pass
 
 
-@decorator
-def needs_sqlite(f, self, *a, **kw):
-    """Decorator: return an empty list in the absence of sqlite."""
-    if sqlite3 is None or not self.enabled:
-        return []
-    else:
-        return f(self, *a, **kw)
+def _copy_function_signature(dest, src):
+    dest.__name__ = src.__name__
+    dest.__doc__ = src.__doc__
+    return dest
+
+def needs_sqlite(f):
+    def decorated(self, *a, **kw):
+        """Decorator: return an empty list in the absence of sqlite."""
+        if sqlite3 is None or not self.enabled:
+            return []
+        else:
+            return f(self, *a, **kw)
+    return _copy_function_signature(decorated, f)
 
 
 if sqlite3 is not None:
@@ -75,28 +80,29 @@ else:
     class DatabaseError(Exception):
         "Dummy exception when sqlite could not be imported. Should never occur."
 
-@decorator
-def catch_corrupt_db(f, self, *a, **kw):
-    """A decorator which wraps HistoryAccessor method calls to catch errors from
-    a corrupt SQLite database, move the old database out of the way, and create
-    a new one.
-    """
-    try:
-        return f(self, *a, **kw)
-    except DatabaseError:
-        if os.path.isfile(self.hist_file):
-            # Try to move the file out of the way
-            base,ext = os.path.splitext(self.hist_file)
-            newpath = base + '-corrupt' + ext
-            os.rename(self.hist_file, newpath)
-            self.init_db()
-            print("ERROR! History file wasn't a valid SQLite database.",
-            "It was moved to %s" % newpath, "and a new file created.")
-            return []
-        
-        else:
-            # The hist_file is probably :memory: or something else.
-            raise
+def catch_corrupt_db(f):
+    def decorated(self, *a, **kw):
+        """A decorator which wraps HistoryAccessor method calls to catch errors from
+        a corrupt SQLite database, move the old database out of the way, and create
+        a new one.
+        """
+        try:
+            return f(self, *a, **kw)
+        except DatabaseError:
+            if os.path.isfile(self.hist_file):
+                # Try to move the file out of the way
+                base,ext = os.path.splitext(self.hist_file)
+                newpath = base + '-corrupt' + ext
+                os.rename(self.hist_file, newpath)
+                self.init_db()
+                print("ERROR! History file wasn't a valid SQLite database.",
+                "It was moved to %s" % newpath, "and a new file created.")
+                return []
+
+            else:
+                # The hist_file is probably :memory: or something else.
+                raise
+    return _copy_function_signature(decorated, f)
         
 
 
