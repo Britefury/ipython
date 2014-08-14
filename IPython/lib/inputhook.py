@@ -23,7 +23,9 @@ except SystemError: # IronPython issue, 2/8/2014
 import os
 import sys
 from distutils.version import LooseVersion as V
-
+if sys.platform.startswith('java'):
+    # Jython ctypes doesn't seem to support PYFUNC, as of Jython 2.7b2, so disable it
+    ctypes = None
 from IPython.utils.warn import warn
 
 #-----------------------------------------------------------------------------
