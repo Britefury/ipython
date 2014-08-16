@@ -28,6 +28,7 @@ Authors
 from __future__ import print_function
 
 # Stdlib imports
+import sys
 import __future__
 from ast import PyCF_ONLY_AST
 import codeop
@@ -36,6 +37,10 @@ import hashlib
 import linecache
 import operator
 import time
+
+_IS_JYTHON = sys.platform.startswith('java')
+if _IS_JYTHON:
+    from org.python.core import CompilerFlags
 
 #-----------------------------------------------------------------------------
 # Constants
@@ -46,6 +51,8 @@ import time
 PyCF_MASK = functools.reduce(operator.or_,
                              (getattr(__future__, fname).compiler_flag
                               for fname in __future__.all_feature_names))
+
+
 
 #-----------------------------------------------------------------------------
 # Local utilities
@@ -69,6 +76,16 @@ def code_name(code, number=0):
 class CachingCompiler(codeop.Compile):
     """A compiler that caches code compiled from interactive statements.
     """
+
+
+    if _IS_JYTHON:
+        @property
+        def flags(self):
+            return self._cflags.toBits()
+
+        @flags.setter
+        def flags(self, f):
+            self._cflags = CompilerFlags(f)
 
     def __init__(self):
         codeop.Compile.__init__(self)
