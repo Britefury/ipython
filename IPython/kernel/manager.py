@@ -12,7 +12,7 @@ import sys
 import time
 import warnings
 
-import zmq
+from .zmq import zmqlib
 
 from IPython.utils.importstring import import_item
 from IPython.utils.localinterfaces import is_local_ip, local_ips
@@ -39,9 +39,9 @@ class KernelManager(ConnectionFileMixin):
     """
 
     # The PyZMQ Context to use for communication with the kernel.
-    context = Instance(zmq.Context)
+    context = Instance(zmqlib.Context)
     def _context_default(self):
-        return zmq.Context.instance()
+        return zmqlib.Context.instance()
 
     # the class to create with our `client` method
     client_class = DottedObjectName('IPython.kernel.blocking.BlockingKernelClient')

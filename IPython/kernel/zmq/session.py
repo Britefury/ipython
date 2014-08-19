@@ -35,10 +35,10 @@ except ImportError:
     # limiting the surface of attack
     def compare_digest(a,b): return a == b
 
-import zmq
-from zmq.utils import jsonapi
-from zmq.eventloop.ioloop import IOLoop
-from zmq.eventloop.zmqstream import ZMQStream
+import zmqlib
+from .zmqlib.utils import jsonapi
+from .zmqlib.eventloop.ioloop import IOLoop
+from .zmqlib.eventloop.zmqstream import ZMQStream
 
 from IPython.core.release import kernel_protocol_version
 from IPython.config.configurable import Configurable, LoggingConfigurable
@@ -93,7 +93,7 @@ default_unpacker = json_unpacker
 
 DELIM = b"<IDS|MSG>"
 # singleton dummy tracker, which will always report as done
-DONE = zmq.MessageTracker()
+DONE = zmqlib.MessageTracker()
 
 #-----------------------------------------------------------------------------
 # Mixin tools for apps that use Sessions
@@ -693,7 +693,7 @@ class Session(Configurable):
         to_send.extend(msg_list)
         stream.send_multipart(to_send, flags, copy=copy)
 
-    def recv(self, socket, mode=zmq.NOBLOCK, content=True, copy=True):
+    def recv(self, socket, mode=zmqlib.ZMQ_NOBLOCK, content=True, copy=True):
         """Receive and unpack a message.
 
         Parameters

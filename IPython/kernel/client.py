@@ -5,7 +5,7 @@
 
 from __future__ import absolute_import
 
-import zmq
+from .zmq import zmqlib
 
 from IPython.utils.traitlets import (
     Any, Instance, Type,
@@ -37,9 +37,9 @@ class KernelClient(ConnectionFileMixin):
     """
 
     # The PyZMQ Context to use for communication with the kernel.
-    context = Instance(zmq.Context)
+    context = Instance(zmqlib.Context)
     def _context_default(self):
-        return zmq.Context.instance()
+        return zmqlib.Context.instance()
 
     # The classes to use for the various channels
     shell_channel_class = Type(ShellChannel)

@@ -10,11 +10,11 @@ import errno
 from threading import Thread
 import time
 
-import zmq
+from .zmq import zmqlib
 # import ZMQError in top-level namespace, to avoid ugly attribute-error messages
 # during garbage collection of threads at exit:
-from zmq import ZMQError
-from zmq.eventloop import ioloop, zmqstream
+from .zmq.zmqlib import ZMQError
+from .zmq.zmqlib.eventloop import ioloop, zmqstream
 
 from IPython.core.release import kernel_protocol_version_info
 
@@ -202,9 +202,9 @@ class ShellChannel(ZMQSocketChannel):
     
     def run(self):
         """The thread's main activity.  Call start() instead."""
-        self.socket = self.context.socket(zmq.DEALER)
+        self.socket = self.context.socket(zmqlib.ZMQ_DEALER)
         self.socket.linger = 1000
-        self.socket.setsockopt(zmq.IDENTITY, self.session.bsession)
+        self.socket.setsockopt(zmqlib.ZMQ_IDENTITY, self.session.bsession)
         self.socket.connect(self.address)
         self.stream = zmqstream.ZMQStream(self.socket, self.ioloop)
         self.stream.on_recv(self._handle_recv)
@@ -410,10 +410,10 @@ class IOPubChannel(ZMQSocketChannel):
 
     def run(self):
         """The thread's main activity.  Call start() instead."""
-        self.socket = self.context.socket(zmq.SUB)
+        self.socket = self.context.socket(zmqlib.ZMQ_SUB)
         self.socket.linger = 1000
-        self.socket.setsockopt(zmq.SUBSCRIBE,b'')
-        self.socket.setsockopt(zmq.IDENTITY, self.session.bsession)
+        self.socket.setsockopt(zmqlib.ZMQ_SUBSCRIBE,b'')
+        self.socket.setsockopt(zmqlib.ZMQ_IDENTITY, self.session.bsession)
         self.socket.connect(self.address)
         self.stream = zmqstream.ZMQStream(self.socket, self.ioloop)
         self.stream.on_recv(self._handle_recv)
@@ -471,9 +471,9 @@ class StdInChannel(ZMQSocketChannel):
 
     def run(self):
         """The thread's main activity.  Call start() instead."""
-        self.socket = self.context.socket(zmq.DEALER)
+        self.socket = self.context.socket(zmqlib.ZMQ_DEALER)
         self.socket.linger = 1000
-        self.socket.setsockopt(zmq.IDENTITY, self.session.bsession)
+        self.socket.setsockopt(zmqlib.ZMQ_IDENTITY, self.session.bsession)
         self.socket.connect(self.address)
         self.stream = zmqstream.ZMQStream(self.socket, self.ioloop)
         self.stream.on_recv(self._handle_recv)
@@ -515,18 +515,18 @@ class HBChannel(ZMQSocketChannel):
         super(HBChannel, self).__init__(context, session, address)
         self._running = False
         self._pause =True
-        self.poller = zmq.Poller()
+        self.poller = zmqlib.Poller()
 
     def _create_socket(self):
         if self.socket is not None:
             # close previous socket, before opening a new one
             self.poller.unregister(self.socket)
             self.socket.close()
-        self.socket = self.context.socket(zmq.REQ)
+        self.socket = self.context.socket(zmqlib.ZMQ_REQ)
         self.socket.linger = 1000
         self.socket.connect(self.address)
 
-        self.poller.register(self.socket, zmq.POLLIN)
+        self.poller.register(self.socket, zmqlib.ZMQ_POLLIN)
 
     def _poll(self, start_time):
         """poll for heartbeat replies until we reach self.time_to_dead.

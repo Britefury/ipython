@@ -21,7 +21,7 @@ from getpass import getpass
 from subprocess import Popen, PIPE
 import tempfile
 
-import zmq
+from .zmq import zmqlib
 
 # IPython imports
 from IPython.config import LoggingConfigurable
@@ -370,11 +370,11 @@ def tunnel_to_kernel(connection_info, sshserver, sshkey=None):
 #-----------------------------------------------------------------------------
 
 channel_socket_types = {
-    'hb' : zmq.REQ,
-    'shell' : zmq.DEALER,
-    'iopub' : zmq.SUB,
-    'stdin' : zmq.DEALER,
-    'control': zmq.DEALER,
+    'hb' : zmqlib.ZMQ_REQ,
+    'shell' : zmqlib.ZMQ_DEALER,
+    'iopub' : zmqlib.ZMQ_SUB,
+    'stdin' : zmqlib.ZMQ_DEALER,
+    'control': zmqlib.ZMQ_DEALER,
 }
 
 port_names = [ "%s_port" % channel for channel in ('shell', 'stdin', 'iopub', 'hb', 'control')]

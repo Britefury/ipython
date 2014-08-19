@@ -8,7 +8,7 @@
 #-----------------------------------------------------------------------------
 # Verify zmq version dependency >= 2.1.11
 #-----------------------------------------------------------------------------
-
+import sys
 from IPython.utils.zmqrelated import check_for_zmq
 
 check_for_zmq('2.1.11', 'IPython.kernel.zmq')
