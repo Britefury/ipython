@@ -145,7 +145,7 @@ class SessionFactory(LoggingConfigurable):
     # not configurable:
     context = Instance('zmq.Context')
     def _context_default(self):
-        return zmq.Context.instance()
+        return zmqlib.Context.instance()
 
     session = Instance('IPython.kernel.zmq.session.Session')
 
@@ -626,7 +626,7 @@ class Session(Configurable):
         msg : dict
             The constructed message.
         """
-        if not isinstance(stream, zmq.Socket):
+        if not isinstance(stream, zmqlib.Socket):
             # ZMQStreams and dummy sockets do not support tracking.
             track = False
 
@@ -711,8 +711,8 @@ class Session(Configurable):
             socket = socket.socket
         try:
             msg_list = socket.recv_multipart(mode, copy=copy)
-        except zmq.ZMQError as e:
-            if e.errno == zmq.EAGAIN:
+        except zmqlib.ZMQError as e:
+            if e.errno == zmqlib.ZMQ_EAGAIN:
                 # We can convert EAGAIN to None as we know in this case
                 # recv_multipart won't return None.
                 return None,None
