@@ -1,4 +1,18 @@
-import sys
+import sys, os
+
+JEROMQ_JAR = 'jeromq-0.3.5-SNAPSHOT.jar'
+
+OTHER_JARS = ['guava-17.0.jar']
+
+
+if os.name == 'java':
+    # Running on Jython
+    if not os.path.exists(JEROMQ_JAR):
+        print 'Could not find {0} to add to sys.path'.format(JEROMQ_JAR)
+        sys.exit()
+    sys.path.append(JEROMQ_JAR)
+    sys.path.extend(OTHER_JARS)
+
 
 from IPython.kernel.connect import find_connection_file
 from IPython.kernel.blocking.client import BlockingKernelClient
