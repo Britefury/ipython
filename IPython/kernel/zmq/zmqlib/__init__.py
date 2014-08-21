@@ -16,7 +16,6 @@ if sys.platform.startswith('java'):
         ZMQ_DEALER, \
         ZMQ_SUBSCRIBE, \
         ZMQ_IDENTITY
-    from zmq import Poller
     from zmq.ZError import ETERM as ZMQ_ETERM, EAGAIN as ZMQ_EAGAIN
 else:
     from zmq import \
@@ -31,4 +30,5 @@ else:
         DEALER as ZMQ_DEALER, \
         SUBSCRIBE as ZMQ_SUBSCRIBE, \
         IDENTITY as ZMQ_IDENTITY
-    from zmq import Poller, Socket
+    from zmq import Socket
+from sugar.poll import Poller

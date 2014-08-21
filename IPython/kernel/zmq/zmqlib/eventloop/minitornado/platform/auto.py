@@ -31,8 +31,7 @@ if os.name == 'nt':
     from .common import Waker
     from .windows import set_close_exec
 elif os.name == 'java':
-    from .common import Waker
-    from .java import set_close_exec
+    from .java import set_close_exec, Waker
 else:
     from .posix import set_close_exec, Waker
 

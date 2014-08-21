@@ -80,7 +80,7 @@ if sys.platform.startswith('java'):
             if events & IOLoop.WRITE:
                 z_events |= ZMQ_POLLOUT
             if events & IOLoop.ERROR:
-                z_events |= POLLERR
+                z_events |= ZMQ_POLLERR
             return z_events
 
         @staticmethod
@@ -91,7 +91,7 @@ if sys.platform.startswith('java'):
                 events |= IOLoop.READ
             if z_events & ZMQ_POLLOUT:
                 events |= IOLoop.WRITE
-            if z_events & POLLERR:
+            if z_events & ZMQ_POLLERR:
                 events |= IOLoop.ERROR
             return events
 
@@ -140,7 +140,7 @@ if sys.platform.startswith('java'):
             try:
                 super(ZMQIOLoop, self).start()
             except ZMQError as e:
-                if e.errno == ETERM:
+                if e.errno == ZMQ_ETERM:
                     # quietly return on ETERM
                     pass
                 else:
@@ -150,7 +150,7 @@ if sys.platform.startswith('java'):
     if tornado_version >= (3,0) and tornado_version < (3,1):
         def backport_close(self, all_fds=False):
             """backport IOLoop.close to 3.0 from 3.1 (supports fd.close() method)"""
-            from zmq.eventloop.minitornado.ioloop import PollIOLoop as mini_loop
+            from .minitornado.ioloop import PollIOLoop as mini_loop
             return mini_loop.close.__get__(self)(all_fds)
         ZMQIOLoop.close = backport_close
 
