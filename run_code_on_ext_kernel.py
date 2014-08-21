@@ -18,11 +18,17 @@ from IPython.kernel.connect import find_connection_file
 from IPython.kernel.blocking.client import BlockingKernelClient
 
 if len(sys.argv) != 2:
+    IPYTHON_OUTPUT = """To connect another client to this kernel, use:
+    --existing kernel-<kernel_id>.json"""
+
     print 'Usage:'
     print '  {0} <kernel_id>'.format(sys.argv[0])
     print ''
     print 'First, start an IPython kernel with regular CPython based IPython:'
     print '> ipython kernel'
+    print ''
+    print 'The last two lines of its output will be:'
+    print IPYTHON_OUTPUT
     print ''
     print 'Take note of the kernel ID and pass it as the ID to this program'
     sys.exit()
