@@ -1,25 +1,20 @@
 import sys
 
 if sys.platform.startswith('java'):
-    from org.zeromq import ZContext
+    from org.zeromq import ZMQ
 
-    class Context (object):
+    class Context (ZMQ.Context):
         __instance = None
 
 
-        def __init__(self):
-            self.__context = ZContext()
+        def __init__(self, num_io_threads):
+            super(Context, self).__init__(num_io_threads)
 
         @classmethod
         def instance(cls):
             if cls.__instance is None:
-                cls.__instance = Context()
+                cls.__instance = cls(1)
             return cls.__instance
-
-
-        def socket(self, type):
-            return self.__context.createSocket(type)
-
 
 
 

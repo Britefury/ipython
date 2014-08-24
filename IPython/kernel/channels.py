@@ -15,6 +15,7 @@ from .zmq import zmqlib
 # during garbage collection of threads at exit:
 from .zmq.zmqlib import ZMQError
 from .zmq.zmqlib.eventloop import ioloop, zmqstream
+from .zmq.zmqlib.utils import sockopts
 
 from IPython.core.release import kernel_protocol_version_info
 
@@ -204,7 +205,7 @@ class ShellChannel(ZMQSocketChannel):
         """The thread's main activity.  Call start() instead."""
         self.socket = self.context.socket(zmqlib.ZMQ_DEALER)
         self.socket.linger = 1000
-        self.socket.setsockopt(zmqlib.ZMQ_IDENTITY, self.session.bsession)
+        sockopts.set_identity(self.socket, self.session.bsession)
         self.socket.connect(self.address)
         self.stream = zmqstream.ZMQStream(self.socket, self.ioloop)
         self.stream.on_recv(self._handle_recv)
@@ -412,8 +413,8 @@ class IOPubChannel(ZMQSocketChannel):
         """The thread's main activity.  Call start() instead."""
         self.socket = self.context.socket(zmqlib.ZMQ_SUB)
         self.socket.linger = 1000
-        self.socket.setsockopt(zmqlib.ZMQ_SUBSCRIBE,b'')
-        self.socket.setsockopt(zmqlib.ZMQ_IDENTITY, self.session.bsession)
+        sockopts.subscribe(self.socket, b'')
+        sockopts.set_identity(self.socket, self.session.bsession)
         self.socket.connect(self.address)
         self.stream = zmqstream.ZMQStream(self.socket, self.ioloop)
         self.stream.on_recv(self._handle_recv)
@@ -473,7 +474,7 @@ class StdInChannel(ZMQSocketChannel):
         """The thread's main activity.  Call start() instead."""
         self.socket = self.context.socket(zmqlib.ZMQ_DEALER)
         self.socket.linger = 1000
-        self.socket.setsockopt(zmqlib.ZMQ_IDENTITY, self.session.bsession)
+        sockopts.set_identity(self.socket, self.session.bsession)
         self.socket.connect(self.address)
         self.stream = zmqstream.ZMQStream(self.socket, self.ioloop)
         self.stream.on_recv(self._handle_recv)
