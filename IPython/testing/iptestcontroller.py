@@ -13,8 +13,9 @@ from __future__ import print_function
 
 import argparse
 import json
-import multiprocessing.pool
 import os
+if os.name != 'java':       # multiprocessing module not available on Jython (yet)
+    import multiprocessing.pool
 import shutil
 import signal
 import sys
@@ -523,7 +524,8 @@ def run_iptestall(options):
     t_start = time.time()
 
     print()
-    if options.fast == 1:
+    # If running on Jython, avoid branch below that uses multiprocessing
+    if options.fast == 1  or  os.name == 'java':
         # This actually means sequential, i.e. with 1 job
         for controller in to_run:
             print('Test group:', controller.section)
