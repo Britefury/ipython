@@ -17,9 +17,7 @@ class Waker(interface.Waker):
     def __init__(self):
         # Based on Zope async.py: http://svn.zope.org/zc.ngi/trunk/src/zc/ngi/async.py
 
-        # Modified for Jython which has None as the default family and type parameters, which causes an
-        # unsupported protocol error later on...
-        self.writer = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.writer = socket.socket()
         # Disable buffering -- pulling the trigger sends 1 byte,
         # and we want that sent immediately, to wake up ASAP.
         self.writer.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)

@@ -13,8 +13,7 @@ if os.name == 'java':
         ZMQ_REQ, \
         ZMQ_SUB, \
         ZMQ_DEALER, \
-        ZMQ_SUBSCRIBE, \
-        ZMQ_IDENTITY
+        ZMQ_SUBSCRIBE
     from org.zeromq import ZMQ
 
     class Poller(object):
@@ -86,7 +85,7 @@ if os.name == 'java':
             n_events = self.__poller.poll(timeout)
             events = []
             if n_events > 0:
-                for i in xrange(self.__poller.getSize()):
+                for i in xrange(self.__poller.getNext()):
                     item = self.__poller.getItem(i)
                     ops = item.readyOps()
                     if ops > 0:
