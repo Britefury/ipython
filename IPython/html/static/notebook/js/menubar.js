@@ -2,36 +2,40 @@
 // Distributed under the terms of the Modified BSD License.
 
 define([
-    'base/js/namespace',
     'jquery',
+    'base/js/namespace',
+    'base/js/dialog',
     'base/js/utils',
     'notebook/js/tour',
     'bootstrap',
-], function(IPython, $, utils, tour) {
+    'moment',
+], function($, IPython, dialog, utils, tour, bootstrap, moment) {
     "use strict";
     
     var MenuBar = function (selector, options) {
-        // Constructor
-        //
-        // A MenuBar Class to generate the menubar of IPython notebook
-        //
-        // Parameters:
-        //  selector: string
-        //  options: dictionary
-        //      Dictionary of keyword arguments.
-        //          notebook: Notebook instance
-        //          layout_manager: LayoutManager instance
-        //          events: $(Events) instance
-        //          save_widget: SaveWidget instance
-        //          quick_help: QuickHelp instance
-        //          base_url : string
-        //          notebook_path : string
-        //          notebook_name : string
+        /**
+         * Constructor
+         *
+         * A MenuBar Class to generate the menubar of IPython notebook
+         *
+         * Parameters:
+         *  selector: string
+         *  options: dictionary
+         *      Dictionary of keyword arguments.
+         *          notebook: Notebook instance
+         *          contents: ContentManager instance
+         *          events: $(Events) instance
+         *          save_widget: SaveWidget instance
+         *          quick_help: QuickHelp instance
+         *          base_url : string
+         *          notebook_path : string
+         *          notebook_name : string
+         */
         options = options || {};
         this.base_url = options.base_url || utils.get_body_data("baseUrl");
         this.selector = selector;
         this.notebook = options.notebook;
-        this.layout_manager = options.layout_manager;
+        this.contents = options.contents;
         this.events = options.events;
         this.save_widget = options.save_widget;
         this.quick_help = options.quick_help;
@@ -65,33 +69,59 @@ define([
     MenuBar.prototype._nbconvert = function (format, download) {
         download = download || false;
         var notebook_path = this.notebook.notebook_path;
-        var notebook_name = this.notebook.notebook_name;
-        if (this.notebook.dirty) {
-            this.notebook.save_notebook({async : false});
-        }
         var url = utils.url_join_encode(
             this.base_url,
             'nbconvert',
             format,
-            notebook_path,
-            notebook_name
+            notebook_path
         ) + "?download=" + download.toString();
+        
+        var w = window.open()
+        if (this.notebook.dirty) {
+            this.notebook.save_notebook().then(function() {
+                w.location = url;
+            });
+        } else {
+            w.location = url;
+        }
+    };
 
-        window.open(url);
+    MenuBar.prototype._size_header = function() {
+        /** 
+         * Update header spacer size.
+         */
+        this.events.trigger('resize-header.Page');
     };
 
     MenuBar.prototype.bind_events = function () {
-        //  File
+        /**
+         *  File
+         */
         var that = this;
         this.element.find('#new_notebook').click(function () {
-            that.notebook.new_notebook();
+            var w = window.open();
+            // Create a new notebook in the same path as the current
+            // notebook's path.
+            var parent = utils.url_path_split(that.notebook.notebook_path)[0];
+            that.contents.new_untitled(parent, {type: "notebook"}).then(
+                    function (data) {
+                        w.location = utils.url_join_encode(
+                                that.base_url, 'notebooks', data.path
+                            );
+                    },
+                    function(error) {
+                        w.close();
+                        dialog.modal({
+                            title : 'Creating Notebook Failed',
+                            body : "The error was: " + error.message,
+                            buttons : {'OK' : {'class' : 'btn-primary'}}
+                        });
+                    }
+                );
         });
         this.element.find('#open_notebook').click(function () {
-            window.open(utils.url_join_encode(
-                that.notebook.base_url,
-                'tree',
-                that.notebook.notebook_path
-            ));
+            var parent = utils.url_path_split(that.notebook.notebook_path)[0];
+            window.open(utils.url_join_encode(that.base_url, 'tree', parent));
         });
         this.element.find('#copy_notebook').click(function () {
             that.notebook.copy_notebook();
@@ -100,26 +130,16 @@ define([
         this.element.find('#download_ipynb').click(function () {
             var base_url = that.notebook.base_url;
             var notebook_path = that.notebook.notebook_path;
-            var notebook_name = that.notebook.notebook_name;
             if (that.notebook.dirty) {
                 that.notebook.save_notebook({async : false});
             }
             
-            var url = utils.url_join_encode(
-                base_url,
-                'files',
-                notebook_path,
-                notebook_name
-            );
-            window.location.assign(url);
+            var url = utils.url_join_encode(base_url, 'files', notebook_path);
+            window.open(url + '?download=1');
         });
         
         this.element.find('#print_preview').click(function () {
             that._nbconvert('html', false);
-        });
-
-        this.element.find('#download_py').click(function () {
-            that._nbconvert('python', true);
         });
 
         this.element.find('#download_html').click(function () {
@@ -132,6 +152,10 @@ define([
 
         this.element.find('#download_pdf').click(function () {
             that._nbconvert('pdf', true);
+        });
+
+        this.element.find('#download_script').click(function () {
+            that._nbconvert('script', true);
         });
 
         this.element.find('#rename_notebook').click(function () {
@@ -157,12 +181,15 @@ define([
             }
         });
         this.element.find('#kill_and_exit').click(function () {
-            that.notebook.session.delete();
-            setTimeout(function(){
-                // allow closing of new tabs in Chromium, impossible in FF
+            var close_window = function () {
+                /**
+                 * allow closing of new tabs in Chromium, impossible in FF
+                 */
                 window.open('', '_self', '');
                 window.close();
-            }, 500);
+            };
+            // finish with close on success or failure
+            that.notebook.session.delete(close_window, close_window);
         });
         // Edit
         this.element.find('#cut_cell').click(function () {
@@ -200,12 +227,12 @@ define([
         
         // View
         this.element.find('#toggle_header').click(function () {
-            $('div#header').toggle();
-            that.layout_manager.do_resize();
+            $('div#header-container').toggle();
+            that._size_header();
         });
         this.element.find('#toggle_toolbar').click(function () {
             $('div#maintoolbar').toggle();
-            that.layout_manager.do_resize();
+            that._size_header();
         });
         // Insert
         this.element.find('#insert_cell_above').click(function () {
@@ -244,24 +271,6 @@ define([
         this.element.find('#to_raw').click(function () {
             that.notebook.to_raw();
         });
-        this.element.find('#to_heading1').click(function () {
-            that.notebook.to_heading(undefined, 1);
-        });
-        this.element.find('#to_heading2').click(function () {
-            that.notebook.to_heading(undefined, 2);
-        });
-        this.element.find('#to_heading3').click(function () {
-            that.notebook.to_heading(undefined, 3);
-        });
-        this.element.find('#to_heading4').click(function () {
-            that.notebook.to_heading(undefined, 4);
-        });
-        this.element.find('#to_heading5').click(function () {
-            that.notebook.to_heading(undefined, 5);
-        });
-        this.element.find('#to_heading6').click(function () {
-            that.notebook.to_heading(undefined, 6);
-        });
         
         this.element.find('#toggle_current_output').click(function () {
             that.notebook.toggle_output();
@@ -285,10 +294,13 @@ define([
         
         // Kernel
         this.element.find('#int_kernel').click(function () {
-            that.notebook.session.interrupt_kernel();
+            that.notebook.kernel.interrupt();
         });
         this.element.find('#restart_kernel').click(function () {
             that.notebook.restart_kernel();
+        });
+        this.element.find('#reconnect_kernel').click(function () {
+            that.notebook.kernel.reconnect();
         });
         // Help
         if (this.tour) {
@@ -310,6 +322,16 @@ define([
         
         this.events.on('checkpoint_created.Notebook', function (event, data) {
             that.update_restore_checkpoint(that.notebook.checkpoints);
+        });
+        
+        this.events.on('notebook_loaded.Notebook', function() {
+            var langinfo = that.notebook.metadata.language_info || {};
+            that.update_nbconvert_script(langinfo);
+        });
+        
+        this.events.on('kernel_ready.Kernel', function(event, data) {
+            var langinfo = data.kernel.info_reply.language_info || {};
+            that.update_nbconvert_script(langinfo);
         });
     };
 
@@ -335,13 +357,26 @@ define([
                 $("<li/>").append(
                     $("<a/>")
                     .attr("href", "#")
-                    .text(d.format("mmm dd HH:MM:ss"))
+                    .text(moment(d).format("LLLL"))
                     .click(function () {
                         that.notebook.restore_checkpoint_dialog(checkpoint);
                     })
                 )
             );
         });
+    };
+    
+    MenuBar.prototype.update_nbconvert_script = function(langinfo) {
+        /**
+         * Set the 'Download as foo' menu option for the relevant language.
+         */
+        var el = this.element.find('#download_script');
+        var that = this;
+        
+        // Set menu entry text to e.g. "Python (.py)"
+        var langname = (langinfo.name || 'Script')
+        langname = langname.charAt(0).toUpperCase()+langname.substr(1) // Capitalise
+        el.find('a').text(langname + ' ('+(langinfo.file_extension || 'txt')+')');
     };
 
     // Backwards compatability.

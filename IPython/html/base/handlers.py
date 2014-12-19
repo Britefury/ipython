@@ -24,15 +24,22 @@ try:
 except ImportError:
     app_log = logging.getLogger()
 
+import IPython
+from IPython.utils.sysinfo import get_sys_info
+
 from IPython.config import Application
 from IPython.utils.path import filefind
 from IPython.utils.py3compat import string_types
 from IPython.html.utils import is_hidden, url_path_join, url_escape
 
+from IPython.html.services.security import csp_report_uri
+
 #-----------------------------------------------------------------------------
 # Top-level handlers
 #-----------------------------------------------------------------------------
 non_alphanum = re.compile(r'[^A-Za-z0-9]')
+
+sys_info = json.dumps(get_sys_info())
 
 class AuthenticatedHandler(web.RequestHandler):
     """A RequestHandler with an authenticated user."""
@@ -40,32 +47,30 @@ class AuthenticatedHandler(web.RequestHandler):
     def set_default_headers(self):
         headers = self.settings.get('headers', {})
 
-        if "X-Frame-Options" not in headers:
-            headers["X-Frame-Options"] = "SAMEORIGIN"
+        if "Content-Security-Policy" not in headers:
+            headers["Content-Security-Policy"] = (
+                    "frame-ancestors 'self'; "
+                    # Make sure the report-uri is relative to the base_url
+                    "report-uri " + url_path_join(self.base_url, csp_report_uri) + ";"
+            )
 
+        # Allow for overriding headers
         for header_name,value in headers.items() :
             try:
                 self.set_header(header_name, value)
-            except Exception:
+            except Exception as e:
                 # tornado raise Exception (not a subclass)
                 # if method is unsupported (websocket and Access-Control-Allow-Origin
                 # for example, so just ignore)
-                pass
+                self.log.debug(e)
     
     def clear_login_cookie(self):
         self.clear_cookie(self.cookie_name)
     
     def get_current_user(self):
-        user_id = self.get_secure_cookie(self.cookie_name)
-        # For now the user_id should not return empty, but it could eventually
-        if user_id == '':
-            user_id = 'anonymous'
-        if user_id is None:
-            # prevent extra Invalid cookie sig warnings:
-            self.clear_login_cookie()
-            if not self.login_available:
-                user_id = 'anonymous'
-        return user_id
+        if self.login_handler is None:
+            return 'anonymous'
+        return self.login_handler.get_user(self)
 
     @property
     def cookie_name(self):
@@ -75,17 +80,15 @@ class AuthenticatedHandler(web.RequestHandler):
         return self.settings.get('cookie_name', default_cookie_name)
     
     @property
-    def password(self):
-        """our password"""
-        return self.settings.get('password', '')
-    
-    @property
     def logged_in(self):
-        """Is a user currently logged in?
-
-        """
+        """Is a user currently logged in?"""
         user = self.get_current_user()
         return (user and not user == 'anonymous')
+
+    @property
+    def login_handler(self):
+        """Return the login handler for this application, if any."""
+        return self.settings.get('login_handler_class', None)
 
     @property
     def login_available(self):
@@ -95,7 +98,9 @@ class AuthenticatedHandler(web.RequestHandler):
         whether the user is already logged in or not.
 
         """
-        return bool(self.settings.get('password', ''))
+        if self.login_handler is None:
+            return False
+        return bool(self.login_handler.login_available(self.settings))
 
 
 class IPythonHandler(AuthenticatedHandler):
@@ -121,6 +126,11 @@ class IPythonHandler(AuthenticatedHandler):
     #---------------------------------------------------------------
     
     @property
+    def version_hash(self):
+        """The version hash to use for cache hints for static files"""
+        return self.settings.get('version_hash', '')
+    
+    @property
     def mathjax_url(self):
         return self.settings.get('mathjax_url', '')
     
@@ -131,6 +141,12 @@ class IPythonHandler(AuthenticatedHandler):
     @property
     def ws_url(self):
         return self.settings.get('websocket_url', '')
+
+    @property
+    def contents_js_source(self):
+        self.log.debug("Using contents: %s", self.settings.get('contents_js_source',
+            'services/contents'))
+        return self.settings.get('contents_js_source', 'services/contents')
     
     #---------------------------------------------------------------
     # Manager objects
@@ -153,8 +169,16 @@ class IPythonHandler(AuthenticatedHandler):
         return self.settings['session_manager']
     
     @property
+    def terminal_manager(self):
+        return self.settings['terminal_manager']
+    
+    @property
     def kernel_spec_manager(self):
         return self.settings['kernel_spec_manager']
+
+    @property
+    def config_manager(self):
+        return self.settings['config_manager']
 
     #---------------------------------------------------------------
     # CORS
@@ -219,6 +243,9 @@ class IPythonHandler(AuthenticatedHandler):
             logged_in=self.logged_in,
             login_available=self.login_available,
             static_url=self.static_url,
+            sys_info=sys_info,
+            contents_js_source=self.contents_js_source,
+            version_hash=self.version_hash,
         )
     
     def get_json_body(self):
@@ -235,12 +262,13 @@ class IPythonHandler(AuthenticatedHandler):
             raise web.HTTPError(400, u'Invalid JSON in body of request')
         return model
 
-    def get_error_html(self, status_code, **kwargs):
+    def write_error(self, status_code, **kwargs):
         """render custom error pages"""
-        exception = kwargs.get('exception')
+        exc_info = kwargs.get('exc_info')
         message = ''
         status_message = responses.get(status_code, 'Unknown HTTP Error')
-        if exception:
+        if exc_info:
+            exception = exc_info[1]
             # get the custom message, if defined
             try:
                 message = exception.log_message % exception.args
@@ -260,13 +288,16 @@ class IPythonHandler(AuthenticatedHandler):
             exception=exception,
         )
         
+        self.set_header('Content-Type', 'text/html')
         # render the template
         try:
             html = self.render_template('%s.html' % status_code, **ns)
         except TemplateNotFound:
             self.log.debug("No template for %d", status_code)
             html = self.render_template('error.html', **ns)
-        return html
+        
+        self.write(html)
+        
 
 
 class Template404(IPythonHandler):
@@ -281,11 +312,17 @@ class AuthenticatedFileHandler(IPythonHandler, web.StaticFileHandler):
     @web.authenticated
     def get(self, path):
         if os.path.splitext(path)[1] == '.ipynb':
-            name = os.path.basename(path)
+            name = path.rsplit('/', 1)[-1]
             self.set_header('Content-Type', 'application/json')
             self.set_header('Content-Disposition','attachment; filename="%s"' % name)
         
         return web.StaticFileHandler.get(self, path)
+    
+    def set_headers(self):
+        super(AuthenticatedFileHandler, self).set_headers()
+        # disable browser caching, rely on 304 replies for savings
+        if "v" not in self.request.arguments:
+            self.add_header("Cache-Control", "no-cache")
     
     def compute_etag(self):
         return None
@@ -326,7 +363,8 @@ def json_errors(method):
             message = e.log_message
             self.log.warn(message)
             self.set_status(e.status_code)
-            self.finish(json.dumps(dict(message=message)))
+            reply = dict(message=message, reason=e.reason)
+            self.finish(json.dumps(reply))
         except Exception:
             self.log.error("Unhandled error in API request", exc_info=True)
             status = 500
@@ -334,7 +372,7 @@ def json_errors(method):
             t, value, tb = sys.exc_info()
             self.set_status(status)
             tb_text = ''.join(traceback.format_exception(t, value, tb))
-            reply = dict(message=message, traceback=tb_text)
+            reply = dict(message=message, reason=None, traceback=tb_text)
             self.finish(json.dumps(reply))
         else:
             return result
@@ -355,7 +393,16 @@ class FileFindHandler(web.StaticFileHandler):
     # cache search results, don't search for files more than once
     _static_paths = {}
     
-    def initialize(self, path, default_filename=None):
+    def set_headers(self):
+        super(FileFindHandler, self).set_headers()
+        # disable browser caching, rely on 304 replies for savings
+        if "v" not in self.request.arguments or \
+                any(self.request.path.startswith(path) for path in self.no_cache_paths):
+            self.add_header("Cache-Control", "no-cache")
+    
+    def initialize(self, path, default_filename=None, no_cache_paths=None):
+        self.no_cache_paths = no_cache_paths or []
+        
         if isinstance(path, string_types):
             path = [path]
         
@@ -394,43 +441,49 @@ class FileFindHandler(web.StaticFileHandler):
         return super(FileFindHandler, self).validate_absolute_path(root, absolute_path)
 
 
+class ApiVersionHandler(IPythonHandler):
+
+    @json_errors
+    def get(self):
+        # not authenticated, so give as few info as possible
+        self.finish(json.dumps({"version":IPython.__version__}))
+
+
 class TrailingSlashHandler(web.RequestHandler):
     """Simple redirect handler that strips trailing slashes
     
     This should be the first, highest priority handler.
     """
     
-    SUPPORTED_METHODS = ['GET']
-    
     def get(self):
         self.redirect(self.request.uri.rstrip('/'))
+    
+    post = put = get
 
 
 class FilesRedirectHandler(IPythonHandler):
     """Handler for redirecting relative URLs to the /files/ handler"""
     def get(self, path=''):
         cm = self.contents_manager
-        if cm.path_exists(path):
+        if cm.dir_exists(path):
             # it's a *directory*, redirect to /tree
             url = url_path_join(self.base_url, 'tree', path)
         else:
             orig_path = path
             # otherwise, redirect to /files
             parts = path.split('/')
-            path = '/'.join(parts[:-1])
-            name = parts[-1]
 
-            if not cm.file_exists(name=name, path=path) and 'files' in parts:
+            if not cm.file_exists(path=path) and 'files' in parts:
                 # redirect without files/ iff it would 404
                 # this preserves pre-2.0-style 'files/' links
                 self.log.warn("Deprecated files/ URL: %s", orig_path)
                 parts.remove('files')
-                path = '/'.join(parts[:-1])
+                path = '/'.join(parts)
 
-            if not cm.file_exists(name=name, path=path):
+            if not cm.file_exists(path=path):
                 raise web.HTTPError(404)
 
-            url = url_path_join(self.base_url, 'files', path, name)
+            url = url_path_join(self.base_url, 'files', path)
         url = url_escape(url)
         self.log.debug("Redirecting %s to %s", self.request.path, url)
         self.redirect(url)
@@ -440,11 +493,9 @@ class FilesRedirectHandler(IPythonHandler):
 # URL pattern fragments for re-use
 #-----------------------------------------------------------------------------
 
-path_regex = r"(?P<path>(?:/.*)*)"
-notebook_name_regex = r"(?P<name>[^/]+\.ipynb)"
-notebook_path_regex = "%s/%s" % (path_regex, notebook_name_regex)
-file_name_regex = r"(?P<name>[^/]+)"
-file_path_regex = "%s/%s" % (path_regex, file_name_regex)
+# path matches any number of `/foo[/bar...]` or just `/` or ''
+path_regex = r"(?P<path>(?:(?:/[^/]+)+|/?))"
+notebook_path_regex = r"(?P<path>(?:/[^/]+)+\.ipynb)"
 
 #-----------------------------------------------------------------------------
 # URL to handler mappings
@@ -452,5 +503,6 @@ file_path_regex = "%s/%s" % (path_regex, file_name_regex)
 
 
 default_handlers = [
-    (r".*/", TrailingSlashHandler)
+    (r".*/", TrailingSlashHandler),
+    (r"api", ApiVersionHandler)
 ]

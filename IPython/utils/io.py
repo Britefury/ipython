@@ -16,7 +16,11 @@ from __future__ import absolute_import
 # Imports
 #-----------------------------------------------------------------------------
 import codecs
+from contextlib import contextmanager
+import io
 import os
+import shutil
+import stat
 import sys
 import tempfile
 from .capture import CapturedIO, capture_output
@@ -216,6 +220,85 @@ def temp_pyfile(src, ext='.py'):
     f.write(src)
     f.flush()
     return fname, f
+
+def _copy_metadata(src, dst):
+    """Copy the set of metadata we want for atomic_writing.
+    
+    Permission bits and flags. We'd like to copy file ownership as well, but we
+    can't do that.
+    """
+    shutil.copymode(src, dst)
+    st = os.stat(src)
+    if hasattr(os, 'chflags') and hasattr(st, 'st_flags'):
+        os.chflags(dst, st.st_flags)
+
+@contextmanager
+def atomic_writing(path, text=True, encoding='utf-8', **kwargs):
+    """Context manager to write to a file only if the entire write is successful.
+    
+    This works by creating a temporary file in the same directory, and renaming
+    it over the old file if the context is exited without an error. If other
+    file names are hard linked to the target file, this relationship will not be
+    preserved.
+    
+    On Windows, there is a small chink in the atomicity: the target file is
+    deleted before renaming the temporary file over it. This appears to be
+    unavoidable.
+    
+    Parameters
+    ----------
+    path : str
+      The target file to write to.
+     
+    text : bool, optional
+      Whether to open the file in text mode (i.e. to write unicode). Default is
+      True.
+    
+    encoding : str, optional
+      The encoding to use for files opened in text mode. Default is UTF-8.
+     
+    **kwargs
+      Passed to :func:`io.open`.
+    """
+    # realpath doesn't work on Windows: http://bugs.python.org/issue9949
+    # Luckily, we only need to resolve the file itself being a symlink, not
+    # any of its directories, so this will suffice:
+    if os.path.islink(path):
+        path = os.path.join(os.path.dirname(path), os.readlink(path))
+
+    dirname, basename = os.path.split(path)
+    handle, tmp_path = tempfile.mkstemp(prefix=basename, dir=dirname)
+    if text:
+        fileobj = io.open(handle, 'w', encoding=encoding, **kwargs)
+    else:
+        fileobj = io.open(handle, 'wb', **kwargs)
+
+    try:
+        yield fileobj
+    except:
+        fileobj.close()
+        os.remove(tmp_path)
+        raise
+
+    # Flush to disk
+    fileobj.flush()
+    os.fsync(fileobj.fileno())
+
+    # Written successfully, now rename it
+    fileobj.close()
+
+    # Copy permission bits, access time, etc.
+    try:
+        _copy_metadata(path, tmp_path)
+    except OSError:
+        # e.g. the file didn't already exist. Ignore any failure to copy metadata
+        pass
+
+    if os.name == 'nt' and os.path.exists(path):
+        # Rename over existing file doesn't work on Windows
+        os.remove(path)
+
+    os.rename(tmp_path, path)
 
 
 def raw_print(*args, **kw):

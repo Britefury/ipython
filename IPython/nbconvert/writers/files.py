@@ -82,7 +82,7 @@ class FilesWriter(WriterBase):
                     for matching_filename in glob.glob(filename):
 
                         # Make sure folder exists.
-                        dest = os.path.join(self.build_directory, filename)
+                        dest = os.path.join(self.build_directory, matching_filename)
                         path = os.path.dirname(dest)
                         self._makedir(path)
 
@@ -93,7 +93,7 @@ class FilesWriter(WriterBase):
 
             # Determine where to write conversion results.
             if output_extension is not None:
-                dest = notebook_name + '.' + output_extension
+                dest = notebook_name + output_extension
             else:
                 dest = notebook_name
             if self.build_directory:

@@ -126,6 +126,27 @@ def test_unicode_completions():
         nt.assert_true(isinstance(text, string_types))
         nt.assert_true(isinstance(matches, list))
 
+@dec.onlyif(sys.version_info[0] >= 3, 'This test only applies in Py>=3')
+def test_latex_completions():
+    from IPython.core.latex_symbols import latex_symbols
+    import random
+    ip = get_ipython()
+    # Test some random unicode symbols
+    keys = random.sample(latex_symbols.keys(), 10)
+    for k in keys:
+        text, matches = ip.complete(k)
+        nt.assert_equal(len(matches),1)
+        nt.assert_equal(text, k)
+        nt.assert_equal(matches[0], latex_symbols[k])
+    # Test a more complex line
+    text, matches = ip.complete(u'print(\\alpha')
+    nt.assert_equals(text, u'\\alpha')
+    nt.assert_equals(matches[0], latex_symbols['\\alpha'])
+    # Test multiple matching latex symbols
+    text, matches = ip.complete(u'\\al')
+    nt.assert_in('\\alpha', matches)
+    nt.assert_in('\\aleph', matches)
+
 
 class CompletionSplitterTestCase(unittest.TestCase):
     def setUp(self):
@@ -222,6 +243,7 @@ def test_omit__names():
     # also happens to test IPCompleter as a configurable
     ip = get_ipython()
     ip._hidden_attr = 1
+    ip._x = {}
     c = ip.Completer
     ip.ex('ip=get_ipython()')
     cfg = Config()
@@ -240,6 +262,8 @@ def test_omit__names():
     s,matches = c.complete('ip.')
     nt.assert_not_in('ip.__str__', matches)
     nt.assert_not_in('ip._hidden_attr', matches)
+    s,matches = c.complete('ip._x.')
+    nt.assert_in('ip._x.keys', matches)
     del ip._hidden_attr
 
 

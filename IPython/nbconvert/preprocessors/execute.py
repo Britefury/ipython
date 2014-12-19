@@ -4,7 +4,6 @@
 # Distributed under the terms of the Modified BSD License.
 
 import os
-import sys
 
 try:
     from queue import Empty  # Py 3
@@ -13,9 +12,10 @@ except ImportError:
 
 from IPython.utils.traitlets import List, Unicode
 
-from IPython.nbformat.current import reads, NotebookNode, writes
+from IPython.nbformat.v4 import output_from_msg
 from .base import Preprocessor
 from IPython.utils.traitlets import Integer
+
 
 class ExecutePreprocessor(Preprocessor):
     """
@@ -25,59 +25,18 @@ class ExecutePreprocessor(Preprocessor):
     timeout = Integer(30, config=True,
         help="The time to wait (in seconds) for output from executions."
     )
-    # FIXME: to be removed with nbformat v4
-    # map msg_type to v3 output_type
-    msg_type_map = {
-        "error" : "pyerr",
-        "execute_result" : "pyout",
-    }
-    
-    # FIXME: to be removed with nbformat v4
-    # map mime-type to v3 mime-type keys
-    mime_map = {
-        "text/plain" : "text",
-        "text/html" : "html",
-        "image/svg+xml" : "svg",
-        "image/png" : "png",
-        "image/jpeg" : "jpeg",
-        "text/latex" : "latex",
-        "application/json" : "json",
-        "application/javascript" : "javascript",
-    }
     
     extra_arguments = List(Unicode)
-    
-    def _create_client(self):
-        from IPython.kernel import KernelManager
-        self.km = KernelManager()
-        self.km.write_connection_file()
-        self.kc = self.km.client()
-        self.kc.start_channels()
-        self.km.start_kernel(extra_arguments=self.extra_arguments, stderr=open(os.devnull, 'w'))
-        self.iopub = self.kc.iopub_channel
-        self.shell = self.kc.shell_channel
-        self.shell.kernel_info()
-        try:
-            self.shell.get_msg(timeout=self.timeout)
-        except Empty:
-            self.log.error("Timeout waiting for kernel_info reply")
-            raise
-        # flush IOPub
-        while True:
-            try:
-                self.iopub.get_msg(block=True, timeout=0.25)
-            except Empty:
-                break
-
-    def _shutdown_client(self):
-        self.kc.stop_channels()
-        self.km.shutdown_kernel()
-        del self.km
 
     def preprocess(self, nb, resources):
-        self._create_client()
-        nb, resources = super(ExecutePreprocessor, self).preprocess(nb, resources)
-        self._shutdown_client()
+        from IPython.kernel import run_kernel
+        kernel_name = nb.metadata.get('kernelspec', {}).get('name', 'python')
+        self.log.info("Executing notebook with kernel: %s" % kernel_name)
+        with run_kernel(kernel_name=kernel_name,
+                        extra_arguments=self.extra_arguments,
+                        stderr=open(os.devnull, 'w')) as kc:
+            self.kc = kc
+            nb, resources = super(ExecutePreprocessor, self).preprocess(nb, resources)
         return nb, resources
 
     def preprocess_cell(self, cell, resources, cell_index):
@@ -87,21 +46,21 @@ class ExecutePreprocessor(Preprocessor):
         if cell.cell_type != 'code':
             return cell, resources
         try:
-            outputs = self.run_cell(self.shell, self.iopub, cell)
+            outputs = self.run_cell(cell)
         except Exception as e:
             self.log.error("failed to run cell: " + repr(e))
-            self.log.error(str(cell.input))
+            self.log.error(str(cell.source))
             raise
         cell.outputs = outputs
         return cell, resources
 
-    def run_cell(self, shell, iopub, cell):
-        msg_id = shell.execute(cell.input)
-        self.log.debug("Executing cell:\n%s", cell.input)
+    def run_cell(self, cell):
+        msg_id = self.kc.execute(cell.source)
+        self.log.debug("Executing cell:\n%s", cell.source)
         # wait for finish, with timeout
         while True:
             try:
-                msg = shell.get_msg(timeout=self.timeout)
+                msg = self.kc.shell_channel.get_msg(timeout=self.timeout)
             except Empty:
                 self.log.error("Timeout waiting for execute reply")
                 raise
@@ -115,7 +74,7 @@ class ExecutePreprocessor(Preprocessor):
 
         while True:
             try:
-                msg = iopub.get_msg(timeout=self.timeout)
+                msg = self.kc.iopub_channel.get_msg(timeout=self.timeout)
             except Empty:
                 self.log.warn("Timeout waiting for IOPub output")
                 break
@@ -126,40 +85,27 @@ class ExecutePreprocessor(Preprocessor):
             msg_type = msg['msg_type']
             self.log.debug("output: %s", msg_type)
             content = msg['content']
+
+            # set the prompt number for the input and the output
+            if 'execution_count' in content:
+                cell['execution_count'] = content['execution_count']
+
             if msg_type == 'status':
                 if content['execution_state'] == 'idle':
                     break
                 else:
                     continue
-            elif msg_type in {'execute_input', 'pyin'}:
+            elif msg_type == 'execute_input':
                 continue
             elif msg_type == 'clear_output':
                 outs = []
                 continue
 
-            out = NotebookNode(output_type=self.msg_type_map.get(msg_type, msg_type))
-
-            # set the prompt number for the input and the output
-            if 'execution_count' in content:
-                cell['prompt_number'] = content['execution_count']
-                out.prompt_number = content['execution_count']
-
-            if msg_type == 'stream':
-                out.stream = content['name']
-                out.text = content['data']
-            elif msg_type in ('display_data', 'execute_result'):
-                out['metadata'] = content['metadata']
-                for mime, data in content['data'].items():
-                    # map mime-type keys to nbformat v3 keys
-                    # this will be unnecessary in nbformat v4
-                    key = self.mime_map.get(mime, mime)
-                    out[key] = data
-            elif msg_type == 'error':
-                out.ename = content['ename']
-                out.evalue = content['evalue']
-                out.traceback = content['traceback']
-            else:
+            try:
+                out = output_from_msg(msg)
+            except ValueError:
                 self.log.error("unhandled iopub msg: " + msg_type)
+            else:
+                outs.append(out)
 
-            outs.append(out)
         return outs

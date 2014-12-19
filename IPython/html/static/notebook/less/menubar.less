@@ -1,27 +1,19 @@
 #menubar {
-  margin-top: 0px;
-  margin-bottom: -19px;
-  position: relative;
   .border-box-sizing();
 
   .navbar {
     border-top: 1px;
     border-radius: 0px 0px @border-radius-base @border-radius-base;
+    margin-bottom: 6px;
   }
-
-
-  li.dropdown {
-    line-height: 12px;
-
-    a {
-      padding-top: 6px;
-      padding-bottom: 5px;
-    }
+  
+  .navbar-toggle {
+    float: left;
   }
-
-  ul.navbar-right {
-    padding-top: 2px;
+  .navbar-collapse {
+    clear: left;
   }
+  
 }
 
 .nav-wrapper {
@@ -39,10 +31,6 @@ ul#help_menu li a{
     i {
         margin-right: -1.2em;
     }
-}
-
-#menus {
-  min-height: 30px;
 }
 
 // Make sub menus work in BS3.

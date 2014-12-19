@@ -8,7 +8,8 @@ pjoin = os.path.join
 
 from IPython.utils.path import get_ipython_dir
 from IPython.utils.py3compat import PY3
-from IPython.utils.traitlets import HasTraits, List, Unicode, Dict
+from IPython.utils.traitlets import HasTraits, List, Unicode, Dict, Any
+from .launcher import make_ipkernel_cmd
 
 if os.name == 'nt':
     programdata = os.environ.get('PROGRAMDATA', None)
@@ -35,19 +36,8 @@ def _pythonfirst(s):
 class KernelSpec(HasTraits):
     argv = List()
     display_name = Unicode()
-    language = Unicode()
-    codemirror_mode = None
     env = Dict()
-    
     resource_dir = Unicode()
-    
-    def __init__(self, resource_dir, argv, display_name, language,
-                 codemirror_mode=None):
-        super(KernelSpec, self).__init__(resource_dir=resource_dir, argv=argv,
-                display_name=display_name, language=language,
-                codemirror_mode=codemirror_mode)
-        if not self.codemirror_mode:
-            self.codemirror_mode = self.language
     
     @classmethod
     def from_resource_dir(cls, resource_dir):
@@ -61,12 +51,12 @@ class KernelSpec(HasTraits):
         return cls(resource_dir=resource_dir, **kernel_dict)
     
     def to_dict(self):
-        return dict(argv=self.argv,
-                    env=self.env,
-                    display_name=self.display_name,
-                    language=self.language,
-                    codemirror_mode=self.codemirror_mode,
-                   )
+        d = dict(argv=self.argv,
+                 env=self.env,
+                 display_name=self.display_name,
+                )
+
+        return d
 
     def to_json(self):
         return json.dumps(self.to_dict())
@@ -106,51 +96,55 @@ class KernelSpecManager(HasTraits):
             self.user_kernel_dir,
         ]
 
-    def _make_native_kernel_dir(self):
+    @property
+    def _native_kernel_dict(self):
         """Makes a kernel directory for the native kernel.
         
         The native kernel is the kernel using the same Python runtime as this
         process. This will put its informatino in the user kernels directory.
         """
-        path = pjoin(self.user_kernel_dir, NATIVE_KERNEL_NAME)
-        os.makedirs(path, mode=0o755)
-        with open(pjoin(path, 'kernel.json'), 'w') as f:
-            json.dump({'argv':[NATIVE_KERNEL_NAME, '-c',
-                               'from IPython.kernel.zmq.kernelapp import main; main()',
-                                '-f', '{connection_file}'],
-                       'display_name': 'IPython (Python %d)' % (3 if PY3 else 2),
-                       'language': 'python',
-                       'codemirror_mode': {'name': 'ipython',
-                                           'version': sys.version_info[0]},
-                      },
-                      f, indent=1)
-        # TODO: Copy icons into directory
-        return path
-    
+        return {'argv': make_ipkernel_cmd(),
+                'display_name': 'IPython (Python %d)' % (3 if PY3 else 2),
+               }
+
+    @property
+    def _native_kernel_resource_dir(self):
+        return pjoin(os.path.dirname(__file__), 'resources')
+
     def find_kernel_specs(self):
         """Returns a dict mapping kernel names to resource directories."""
         d = {}
         for kernel_dir in self.kernel_dirs:
             d.update(_list_kernels_in(kernel_dir))
-        
-        if NATIVE_KERNEL_NAME not in d:
-            d[NATIVE_KERNEL_NAME] = self._make_native_kernel_dir()
+
+        d[NATIVE_KERNEL_NAME] = self._native_kernel_resource_dir
         return d
         # TODO: Caching?
-    
+
     def get_kernel_spec(self, kernel_name):
         """Returns a :class:`KernelSpec` instance for the given kernel_name.
         
         Raises :exc:`NoSuchKernel` if the given kernel name is not found.
         """
-        if kernel_name == 'python':
-            kernel_name = NATIVE_KERNEL_NAME
+        if kernel_name in {'python', NATIVE_KERNEL_NAME}:
+            return KernelSpec(resource_dir=self._native_kernel_resource_dir,
+                              **self._native_kernel_dict)
+
         d = self.find_kernel_specs()
         try:
             resource_dir = d[kernel_name.lower()]
         except KeyError:
             raise NoSuchKernel(kernel_name)
         return KernelSpec.from_resource_dir(resource_dir)
+    
+    def _get_destination_dir(self, kernel_name, system=False):
+        if system:
+            if SYSTEM_KERNEL_DIRS:
+                return os.path.join(SYSTEM_KERNEL_DIRS[-1], kernel_name)
+            else:
+                raise EnvironmentError("No system kernel directory is available")
+        else:
+            return os.path.join(self.user_kernel_dir, kernel_name)
 
     def install_kernel_spec(self, source_dir, kernel_name=None, system=False,
                             replace=False):
@@ -170,19 +164,33 @@ class KernelSpecManager(HasTraits):
         if not kernel_name:
             kernel_name = os.path.basename(source_dir)
         kernel_name = kernel_name.lower()
-
-        if system:
-            if SYSTEM_KERNEL_DIRS:
-                destination = os.path.join(SYSTEM_KERNEL_DIRS[-1], kernel_name)
-            else:
-                raise EnvironmentError("No system kernel directory is available")
-        else:
-            destination = os.path.join(self.user_kernel_dir, kernel_name)
+        
+        destination = self._get_destination_dir(kernel_name, system=system)
 
         if replace and os.path.isdir(destination):
             shutil.rmtree(destination)
 
         shutil.copytree(source_dir, destination)
+
+    def install_native_kernel_spec(self, system=False):
+        """Install the native kernel spec to the filesystem
+        
+        This allows a Python 3 frontend to use a Python 2 kernel, or vice versa.
+        The kernelspec will be written pointing to the Python executable on
+        which this is run.
+        
+        If ``system`` is True, it will attempt to install into the systemwide
+        kernel registry. If the process does not have appropriate permissions, 
+        an :exc:`OSError` will be raised.
+        """
+        path = self._get_destination_dir(NATIVE_KERNEL_NAME, system=system)
+        os.makedirs(path, mode=0o755)
+        with open(pjoin(path, 'kernel.json'), 'w') as f:
+            json.dump(self._native_kernel_dict, f, indent=1)
+        copy_from = self._native_kernel_resource_dir
+        for file in os.listdir(copy_from):
+            shutil.copy(pjoin(copy_from, file), path)
+        return path
 
 def find_kernel_specs():
     """Returns a dict mapping kernel names to resource directories."""
@@ -200,3 +208,8 @@ def install_kernel_spec(source_dir, kernel_name=None, system=False, replace=Fals
                                                     system, replace)
 
 install_kernel_spec.__doc__ = KernelSpecManager.install_kernel_spec.__doc__
+
+def install_native_kernel_spec(self, system=False):
+    return KernelSpecManager().install_native_kernel_spec(system=system)
+
+install_native_kernel_spec.__doc__ = KernelSpecManager.install_native_kernel_spec.__doc__

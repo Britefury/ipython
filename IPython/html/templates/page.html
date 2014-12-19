@@ -5,8 +5,8 @@
     <meta charset="utf-8">
 
     <title>{% block title %}IPython Notebook{% endblock %}</title>
-    <link rel="shortcut icon" type="image/x-icon" href="{{static_url("base/images/favicon.ico") }}">
-    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    {% block favicon %}<link rel="shortcut icon" type="image/x-icon" href="{{static_url("base/images/favicon.ico") }}">{% endblock %}
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <link rel="stylesheet" href="{{static_url("components/jquery-ui/themes/smoothness/jquery-ui.min.css") }}" type="text/css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
@@ -14,20 +14,26 @@
     <link rel="stylesheet" href="{{ static_url("style/style.min.css") }}" type="text/css"/>
     {% endblock %}
     <link rel="stylesheet" href="{{ static_url("custom/custom.css") }}" type="text/css" />
+    <script src="{{static_url("components/es6-promise/promise.min.js")}}" type="text/javascript" charset="utf-8"></script>
     <script src="{{static_url("components/requirejs/require.js") }}" type="text/javascript" charset="utf-8"></script>
     <script>
       require.config({
+          {% if version_hash %}
+          urlArgs: "v={{version_hash}}",
+          {% endif %}
           baseUrl: '{{static_url("", include_version=False)}}',
           paths: {
             nbextensions : '{{ base_url }}nbextensions',
+            kernelspecs : '{{ base_url }}kernelspecs',
             underscore : 'components/underscore/underscore-min',
             backbone : 'components/backbone/backbone-min',
             jquery: 'components/jquery/jquery.min',
             bootstrap: 'components/bootstrap/js/bootstrap.min',
             bootstraptour: 'components/bootstrap-tour/build/js/bootstrap-tour.min',
-            dateformat: 'dateformat/date.format',
             jqueryui: 'components/jquery-ui/ui/minified/jquery-ui.min',
-            highlight: 'components/highlight.js/build/highlight.pack',
+            moment: 'components/moment/moment',
+            codemirror: 'components/codemirror',
+            termjs: 'components/term.js/src/term',
           },
           shim: {
             underscore: {
@@ -45,16 +51,18 @@
               deps: ["bootstrap"],
               exports: "Tour"
             },
-            dateformat: {
-              exports: "dateFormat"
-            },
             jqueryui: {
               deps: ["jquery"],
               exports: "$"
-            },
-            highlight: {
-              exports: "hljs"
-            },
+            }
+          }
+      });
+
+      require.config({
+          map: {
+              '*':{
+                'contents': '{{ contents_js_source }}',
+              }
           }
       });
     </script>
@@ -73,26 +81,31 @@
   </div>
 </noscript>
 
-<div id="header" class="navbar navbar-static-top">
-  <div class="container">
-  <div id="ipython_notebook" class="nav navbar-brand pull-left"><a href="{{base_url}}tree/{{notebook_path}}" alt='dashboard'><img src='{{static_url("base/images/ipynblogo.png") }}' alt='IPython Notebook'/></a></div>
+<div id="header" class="navbar navbar-fixed-top">
+  <div id="header-container" class="container">
+  <div id="ipython_notebook" class="nav navbar-brand pull-left"><a href="{{base_url}}tree" title='dashboard'>{% block logo %}<img src='{{static_url("base/images/logo.png") }}' alt='Jupyter Notebook'/>{% endblock %}</a></div>
 
   {% block login_widget %}
 
     <span id="login_widget">
       {% if logged_in %}
-        <button id="logout">Logout</button>
+        <button id="logout" class="btn btn-sm navbar-btn">Logout</button>
       {% elif login_available and not logged_in %}
-        <button id="login">Login</button>
+        <button id="login" class="btn btn-sm navbar-btn">Login</button>
       {% endif %}
     </span>
 
   {% endblock %}
 
-  {% block header %}
+  {% block headercontainer %}
   {% endblock %}
   </div>
+  <div class="header-bar"></div>
+
+  {% block header %}
+  {% endblock %}
 </div>
+<div id="header-spacer"></div>
 
 <div id="site">
 {% block site %}

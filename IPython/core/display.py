@@ -1,26 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Top-level display functions for displaying object in different formats.
+"""Top-level display functions for displaying object in different formats."""
 
-Authors:
-
-* Brian Granger
-"""
-
-#-----------------------------------------------------------------------------
-#       Copyright (C) 2013 The IPython Development Team
-#
-#  Distributed under the terms of the BSD License.  The full license is in
-#  the file COPYING, distributed as part of this software.
-#-----------------------------------------------------------------------------
-
-#-----------------------------------------------------------------------------
-# Imports
-#-----------------------------------------------------------------------------
+# Copyright (c) IPython Development Team.
+# Distributed under the terms of the Modified BSD License.
 
 from __future__ import print_function
 
+import json
+import mimetypes
 import os
 import struct
+import warnings
 
 from IPython.core.formatters import _safe_get_formatter_method
 from IPython.utils.py3compat import (string_types, cast_bytes_py2, cast_unicode,
@@ -163,20 +153,13 @@ def display(*objs, **kwargs):
         format = InteractiveShell.instance().display_formatter.format
 
     for obj in objs:
-
-        # If _ipython_display_ is defined, use that to display this object.
-        display_method = _safe_get_formatter_method(obj, '_ipython_display_')
-        if display_method is not None:
-            try:
-                display_method(**kwargs)
-            except NotImplementedError:
-                pass
-            else:
-                continue
         if raw:
             publish_display_data(data=obj, metadata=metadata)
         else:
             format_dict, md_dict = format(obj, include=include, exclude=exclude)
+            if not format_dict:
+                # nothing to display (e.g. _ipython_display_ took over)
+                continue
             if metadata:
                 # kwarg-specified metadata gets precedence
                 _merge(md_dict, metadata)
@@ -520,7 +503,29 @@ class SVG(DisplayObject):
         return self.data
 
 
-class JSON(TextDisplayObject):
+class JSON(DisplayObject):
+    """JSON expects a JSON-able dict or list
+    
+    not an already-serialized JSON string.
+    
+    Scalar types (None, number, string) are not allowed, only dict or list containers.
+    """
+    # wrap data in a property, which warns about passing already-serialized JSON
+    _data = None
+    def _check_data(self):
+        if self.data is not None and not isinstance(self.data, (dict, list)):
+            raise TypeError("%s expects JSONable dict or list, not %r" % (self.__class__.__name__, self.data))
+
+    @property
+    def data(self):
+        return self._data
+    
+    @data.setter
+    def data(self, data):
+        if isinstance(data, string_types):
+            warnings.warn("JSON expects JSONable dict or list, not JSON strings")
+            data = json.loads(data)
+        self._data = data
 
     def _repr_json_(self):
         return self.data
@@ -781,6 +786,90 @@ class Image(DisplayObject):
     def _find_ext(self, s):
         return unicode_type(s.split('.')[-1].lower())
 
+class Video(DisplayObject):
+
+    def __init__(self, data=None, url=None, filename=None, embed=None, mimetype=None):
+        """Create a video object given raw data or an URL.
+
+        When this object is returned by an input cell or passed to the
+        display function, it will result in the video being displayed
+        in the frontend.
+
+        Parameters
+        ----------
+        data : unicode, str or bytes
+            The raw image data or a URL or filename to load the data from.
+            This always results in embedded image data.
+        url : unicode
+            A URL to download the data from. If you specify `url=`,
+            the image data will not be embedded unless you also specify `embed=True`.
+        filename : unicode
+            Path to a local file to load the data from.
+            Videos from a file are always embedded.
+        embed : bool
+            Should the image data be embedded using a data URI (True) or be
+            loaded using an <img> tag. Set this to True if you want the image
+            to be viewable later with no internet connection in the notebook.
+
+            Default is `True`, unless the keyword argument `url` is set, then
+            default value is `False`.
+
+            Note that QtConsole is not able to display images if `embed` is set to `False`
+        mimetype: unicode
+            Specify the mimetype in case you load in a encoded video.
+        Examples
+        --------
+        Video('https://archive.org/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues_small.mp4')
+        Video('path/to/video.mp4')
+        Video('path/to/video.mp4', embed=False)
+        """
+        if url is None and (data.startswith('http') or data.startswith('https')):
+            url = data
+            data = None
+            embed = False
+        elif os.path.exists(data):
+            filename = data
+            data = None
+
+        self.mimetype = mimetype
+        self.embed = embed if embed is not None else (filename is not None)
+        super(Video, self).__init__(data=data, url=url, filename=filename)
+
+    def _repr_html_(self):
+        # External URLs and potentially local files are not embedded into the
+        # notebook output.
+        if not self.embed:
+            url = self.url if self.url is not None else self.filename
+            output = """<video src="{0}" controls>
+      Your browser does not support the <code>video</code> element.
+    </video>""".format(url)
+            return output
+        # Embedded videos uses base64 encoded videos.
+        if self.filename is not None:
+            mimetypes.init()
+            mimetype, encoding = mimetypes.guess_type(self.filename)
+
+            video = open(self.filename, 'rb').read()
+            video_encoded = video.encode('base64')
+        else:
+            video_encoded = self.data
+            mimetype = self.mimetype
+        output = """<video controls>
+ <source src="data:{0};base64,{1}" type="{0}">
+ Your browser does not support the video tag.
+ </video>""".format(mimetype, video_encoded)
+        return output
+
+    def reload(self):
+        # TODO
+        pass
+
+    def _repr_png_(self):
+        # TODO
+        pass
+    def _repr_jpeg_(self):
+        # TODO
+        pass
 
 def clear_output(wait=False):
     """Clear the output of the current cell receiving output.

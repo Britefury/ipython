@@ -1,20 +1,11 @@
-#-------------------------------------------------------------------------------
-#  Copyright (C) 2012  The IPython Development Team
-#
-#  Distributed under the terms of the BSD License.  The full license is in
-#  the file COPYING, distributed as part of this software.
-#-------------------------------------------------------------------------------
+# Copyright (c) IPython Development Team.
+# Distributed under the terms of the Modified BSD License.
 
-#-----------------------------------------------------------------------------
-# Imports
-#-----------------------------------------------------------------------------
 from __future__ import print_function
 
-# Standard library imports
 import sys
 import unittest
 
-# Local imports
 from IPython.kernel.inprocess.blocking import BlockingInProcessKernelClient
 from IPython.kernel.inprocess.manager import InProcessKernelManager
 from IPython.kernel.inprocess.ipkernel import InProcessKernel
@@ -27,9 +18,6 @@ if py3compat.PY3:
 else:
     from StringIO import StringIO
 
-#-----------------------------------------------------------------------------
-# Test case
-#-----------------------------------------------------------------------------
 
 class InProcessKernelTestCase(unittest.TestCase):
 
@@ -38,15 +26,15 @@ class InProcessKernelTestCase(unittest.TestCase):
         self.km.start_kernel()
         self.kc = BlockingInProcessKernelClient(kernel=self.km.kernel)
         self.kc.start_channels()
+        self.kc.wait_for_ready()
 
     @skipif_not_matplotlib
     def test_pylab(self):
-        """ Does pylab work in the in-process kernel?
-        """
+        """Does %pylab work in the in-process kernel?"""
         kc = self.kc
         kc.execute('%pylab')
         msg = get_stream_message(kc)
-        self.assert_('matplotlib' in msg['content']['data'])
+        self.assertIn('matplotlib', msg['content']['text'])
 
     def test_raw_input(self):
         """ Does the in-process kernel handle raw_input correctly?
@@ -74,9 +62,9 @@ class InProcessKernelTestCase(unittest.TestCase):
 
         kc = BlockingInProcessKernelClient(kernel=kernel)
         kernel.frontends.append(kc)
-        kc.shell_channel.execute('print("bar")')
+        kc.execute('print("bar")')
         msg = get_stream_message(kc)
-        self.assertEqual(msg['content']['data'], 'bar\n')
+        self.assertEqual(msg['content']['text'], 'bar\n')
 
 #-----------------------------------------------------------------------------
 # Utility functions

@@ -30,6 +30,12 @@ def cast_bytes(s, encoding=None):
         return encode(s, encoding)
     return s
 
+def buffer_to_bytes(buf):
+    """Cast a buffer object to bytes"""
+    if not isinstance(buf, bytes):
+        buf = bytes(buf)
+    return buf
+
 def _modify_str_or_docstring(str_change_func):
     @functools.wraps(str_change_func)
     def wrapper(func_or_str):
@@ -86,6 +92,7 @@ if sys.version_info[0] >= 3:
     bytes_to_str = decode
     cast_bytes_py2 = no_code
     cast_unicode_py2 = no_code
+    buffer_to_bytes_py2 = no_code
     
     string_types = (str,)
     unicode_type = str
@@ -101,11 +108,12 @@ if sys.version_info[0] >= 3:
     getcwd = os.getcwd
     
     MethodType = types.MethodType
-    
-    def execfile(fname, glob, loc=None):
+
+    def execfile(fname, glob, loc=None, compiler=None):
         loc = loc if (loc is not None) else glob
         with open(fname, 'rb') as f:
-            exec(compile(f.read(), fname, 'exec'), glob, loc)
+            compiler = compiler or compile
+            exec(compiler(f.read(), fname, 'exec'), glob, loc)
     
     # Refactor print statements in doctests.
     _print_statement_re = re.compile(r"\bprint (?P<expr>.*)$", re.MULTILINE)
@@ -150,6 +158,7 @@ else:
     bytes_to_str = no_code
     cast_bytes_py2 = cast_bytes
     cast_unicode_py2 = cast_unicode
+    buffer_to_bytes_py2 = buffer_to_bytes
     
     string_types = (str, unicode)
     unicode_type = unicode
@@ -185,26 +194,30 @@ else:
         return s.format(u='u')
 
     if sys.platform == 'win32':
-        def execfile(fname, glob=None, loc=None):
+        def execfile(fname, glob=None, loc=None, compiler=None):
             loc = loc if (loc is not None) else glob
-            # The rstrip() is necessary b/c trailing whitespace in files will
-            # cause an IndentationError in Python 2.6 (this was fixed in 2.7,
-            # but we still support 2.6).  See issue 1027.
-            scripttext = builtin_mod.open(fname).read().rstrip() + '\n'
+            scripttext = builtin_mod.open(fname).read()+ '\n'
             # compile converts unicode filename to str assuming
             # ascii. Let's do the conversion before calling compile
             if isinstance(fname, unicode):
                 filename = unicode_to_str(fname)
             else:
                 filename = fname
-            exec(compile(scripttext, filename, 'exec'), glob, loc)
+            compiler = compiler or compile
+            exec(compiler(scripttext, filename, 'exec'), glob, loc)
+
     else:
-        def execfile(fname, *where):
+        def execfile(fname, glob=None, loc=None, compiler=None):
             if isinstance(fname, unicode):
                 filename = fname.encode(sys.getfilesystemencoding())
             else:
                 filename = fname
-            builtin_mod.execfile(filename, *where)
+            where = [ns for ns in [glob, loc] if ns is not None]
+            if compiler is None:
+                builtin_mod.execfile(filename, *where)
+            else:
+                scripttext = builtin_mod.open(fname).read().rstrip() + '\n'
+                exec(compiler(scripttext, filename, 'exec'), glob, loc)
 
 
 def annotate(**kwargs):

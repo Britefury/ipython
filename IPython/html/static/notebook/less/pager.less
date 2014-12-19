@@ -1,25 +1,72 @@
-div#pager_splitter {
-    height: 8px;
-    .border-box-sizing();
-}
-
-#pager-container {
-    position: relative;
-    padding: 15px 0px;
-    .border-box-sizing();
-}
-
 div#pager {
+    background-color:   @body-bg;
     font-size: @notebook_font_size;
     line-height: @notebook_line_height;
-    overflow: auto;
+    overflow: hidden;
     display: none;
+    position: fixed;
+    bottom: 0px;
+    width: 100%;
+    max-height: 50%;
+    padding-top: 8px;
+
+    /* Display over codemirror */
+    z-index: 100;
+
+    /* Hack which prevents jquery ui resizable from changing top. */
+    top: inherit !important; 
 
     pre {
-      line-height: @code_line_height;
-      color: @text-color;
-      background-color: @cell_background;
-      padding: @code_padding;
+        line-height: @code_line_height;
+        color: @text-color;
+        background-color: @cell_background;
+        padding: @code_padding;
     }
-    .border-box-sizing();
+
+    #pager-button-area {
+        position: absolute;
+        top: 8px;
+        right: 20px; 
+    }
+
+    #pager-contents {
+        position: relative;
+        overflow: auto;
+        width: 100%;
+        height: 100%;
+
+        #pager-container {
+            position: relative;
+            padding: 15px 0px;
+            .border-box-sizing();
+        }
+    }
+
+    .ui-resizable-handle {
+        top: 0px;
+        height: 8px;
+        background: @cell_background;
+        border-top: 1px solid @light_border_color;
+        border-bottom: 1px solid @light_border_color;
+
+        /* Similar to the notebook header's shadow, but not
+        exactly the same.  The settings had to be adjusted
+        to get the shadow to show. */
+        .box-shadow(1px 4px 9px -3px rgba(0, 0, 0, 0.15));
+
+        /* This injects handle bars (a short, wide = symbol) for 
+        the resize handle. */
+        &::after {
+            content: '';
+            
+            top: 2px;
+            left: 50%;
+            height: 3px;
+            width: 30px;
+            margin-left: -15px;
+            position: absolute;
+
+            border-top: 1px solid @light_border_color;
+        }
+    }
 }

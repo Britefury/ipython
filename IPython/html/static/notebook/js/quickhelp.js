@@ -11,14 +11,16 @@ define([
     var platform = utils.platform;
 
     var QuickHelp = function (options) {
-        // Constructor
-        //
-        // Parameters:
-        //  options: dictionary
-        //      Dictionary of keyword arguments.
-        //          events: $(Events) instance
-        //          keyboard_manager: KeyboardManager instance
-        //          notebook: Notebook instance
+        /**
+         * Constructor
+         *
+         * Parameters:
+         *  options: dictionary
+         *      Dictionary of keyword arguments.
+         *          events: $(Events) instance
+         *          keyboard_manager: KeyboardManager instance
+         *          notebook: Notebook instance
+         */
         this.keyboard_manager = options.keyboard_manager;
         this.notebook = options.notebook;
         this.keyboard_manager.quick_help = this;
@@ -34,10 +36,10 @@ define([
         platform_specific = [
             { shortcut: "Cmd-Up",     help:"go to cell start"  },
             { shortcut: "Cmd-Down",   help:"go to cell end"  },
-            { shortcut: "Opt-Left",   help:"go one word left"  },
-            { shortcut: "Opt-Right",  help:"go one word right"  },
-            { shortcut: "Opt-Backspace",      help:"del word before"  },
-            { shortcut: "Opt-Delete",         help:"del word after"  },
+            { shortcut: "Alt-Left",   help:"go one word left"  },
+            { shortcut: "Alt-Right",  help:"go one word right"  },
+            { shortcut: "Alt-Backspace",      help:"del word before"  },
+            { shortcut: "Alt-Delete",         help:"del word after"  },
         ];
     } else {
         // PC specific
@@ -63,14 +65,92 @@ define([
         { shortcut: cmd_ctrl + "Shift-z",   help:"redo"  },
         { shortcut: cmd_ctrl + "y",   help:"redo"  },
     ].concat( platform_specific );
+    
+    var mac_humanize_map = {
+        // all these are unicode, will probably display badly on anything except macs.
+        // these are the standard symbol that are used in MacOS native menus
+        // cf http://apple.stackexchange.com/questions/55727/
+        // for htmlentities and/or unicode value
+        'cmd':'⌘',
+        'shift':'⇧',
+        'alt':'⌥',
+        'up':'↑',
+        'down':'↓',
+        'left':'←',
+        'right':'→',
+        'eject':'⏏',
+        'tab':'⇥',
+        'backtab':'⇤',
+        'capslock':'⇪',
+        'esc':'⎋',
+        'ctrl':'⌃',
+        'enter':'↩',
+        'pageup':'⇞',
+        'pagedown':'⇟',
+        'home':'↖',
+        'end':'↘',
+        'altenter':'⌤',
+        'space':'␣',
+        'delete':'⌦',
+        'backspace':'⌫',
+        'apple':'',
+    };
 
+    var default_humanize_map = {
+        'shift':'Shift',
+        'alt':'Alt',
+        'up':'Up',
+        'down':'Down',
+        'left':'Left',
+        'right':'Right',
+        'tab':'Tab',
+        'capslock':'Caps Lock',
+        'esc':'Esc',
+        'ctrl':'Ctrl',
+        'enter':'Enter',
+        'pageup':'Page Up',
+        'pagedown':'Page Down',
+        'home':'Home',
+        'end':'End',
+        'space':'Space',
+        'backspace':'Backspace',
+        };
+    
+    var humanize_map;
 
+    if (platform === 'MacOS'){
+        humanize_map = mac_humanize_map;
+    } else {
+        humanize_map = default_humanize_map;
+    }
 
-      
+    function humanize_key(key){
+        if (key.length === 1){
+            key = key.toUpperCase();
+        }
+        return humanize_map[key.toLowerCase()]||key;
+    }
+
+    function humanize_sequence(sequence){
+        var joinchar = ',';
+        var hum = _.map(sequence.replace(/meta/g, 'cmd').split(','), humanize_shortcut).join(joinchar);
+        return hum;
+    }
+
+    function humanize_shortcut(shortcut){
+        var joinchar = '-';
+        if (platform === 'MacOS'){
+            joinchar = '';
+        }
+        var sh = _.map(shortcut.split('-'), humanize_key ).join(joinchar);
+        return sh;
+    }
 
 
     QuickHelp.prototype.show_keyboard_shortcuts = function () {
-        // toggles display of keyboard shortcut dialog
+        /**
+         * toggles display of keyboard shortcut dialog
+         */
         var that = this;
         if ( this.force_rebuild ) {
             this.shortcut_dialog.remove();
@@ -139,7 +219,9 @@ define([
                 keys[i] = "<code><strong>" + k + "</strong></code>";
                 continue; // leave individual keys lower-cased
             }
-            keys[i] = ( special_case[k] ? special_case[k] : k.charAt(0).toUpperCase() + k.slice(1) );
+            if (k.indexOf(',') === -1){
+                keys[i] = ( special_case[k] ? special_case[k] : k.charAt(0).toUpperCase() + k.slice(1) );
+            }
             keys[i] = "<code><strong>" + keys[i] + "</strong></code>";
         }
         return keys.join('-');
@@ -155,7 +237,10 @@ define([
 
     var build_one = function (s) {
         var help = s.help;
-        var shortcut = prettify(s.shortcut);
+        var shortcut = '';
+        if(s.shortcut){
+            shortcut = prettify(humanize_sequence(s.shortcut));
+        }
         return $('<div>').addClass('quickhelp').
             append($('<span/>').addClass('shortcut_key').append($(shortcut))).
             append($('<span/>').addClass('shortcut_descr').text(' : ' + help));

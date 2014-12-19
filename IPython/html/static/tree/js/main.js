@@ -2,31 +2,42 @@
 // Distributed under the terms of the Modified BSD License.
 
 require([
-    'base/js/namespace',
     'jquery',
+    'base/js/namespace',
+    'base/js/dialog',
     'base/js/events',
     'base/js/page',
     'base/js/utils',
+    'services/config',
+    'contents',
     'tree/js/notebooklist',
     'tree/js/clusterlist',
     'tree/js/sessionlist',
     'tree/js/kernellist',
+    'tree/js/terminallist',
+    'tree/js/newnotebook',
     'auth/js/loginwidget',
     // only loaded, not used:
     'jqueryui',
     'bootstrap',
     'custom/custom',
 ], function(
-    IPython, 
-    $, 
+    $,
+    IPython,
+    dialog,
     events,
-    page, 
-    utils, 
-    notebooklist, 
-    clusterlist, 
-    sesssionlist, 
-    kernellist, 
+    page,
+    utils,
+    config,
+    contents_service,
+    notebooklist,
+    clusterlist,
+    sesssionlist,
+    kernellist,
+    terminallist,
+    newnotebook,
     loginwidget){
+    "use strict";
 
     page = new page.Page();
     
@@ -34,21 +45,38 @@ require([
         base_url: utils.get_body_data("baseUrl"),
         notebook_path: utils.get_body_data("notebookPath"),
     };
-    session_list = new sesssionlist.SesssionList($.extend({
+    var cfg = new config.ConfigSection('tree', common_options);
+    cfg.load();
+    common_options.config = cfg;
+    
+    var session_list = new sesssionlist.SesssionList($.extend({
         events: events}, 
         common_options));
-    notebook_list = new notebooklist.NotebookList('#notebook_list', $.extend({
+    var contents = new contents_service.Contents($.extend({
+        events: events},
+        common_options));
+    var notebook_list = new notebooklist.NotebookList('#notebook_list', $.extend({
+        contents: contents,
         session_list:  session_list}, 
         common_options));
-    cluster_list = new clusterlist.ClusterList('#cluster_list', common_options);
-    kernel_list = new kernellist.KernelList('#running_list',  $.extend({
+    var cluster_list = new clusterlist.ClusterList('#cluster_list', common_options);
+    var kernel_list = new kernellist.KernelList('#running_list',  $.extend({
         session_list:  session_list}, 
         common_options));
-    login_widget = new loginwidget.LoginWidget('#login_widget', common_options);
+    
+    var terminal_list;
+    if (utils.get_body_data("terminalsAvailable") === "True") {
+        terminal_list = new terminallist.TerminalList('#terminal_list', common_options);
+    }
 
-    $('#new_notebook').click(function (e) {
-        notebook_list.new_notebook();
-    });
+    var login_widget = new loginwidget.LoginWidget('#login_widget', common_options);
+
+    var nnw = new newnotebook.NewNotebookWidget("#new-notebook-buttons",
+        $.extend(
+            {contents: contents},
+            common_options
+        )
+    );
 
     var interval_id=0;
     // auto refresh every xx secondes, no need to be fast,
@@ -56,21 +84,23 @@ require([
     var time_refresh = 60; // in sec
 
     var enable_autorefresh = function(){
-        //refresh immediately , then start interval
-        if($('.upload_button').length === 0)
-        {
-            session_list.load_sessions();
-            cluster_list.load_list();
+        /**
+         *refresh immediately , then start interval
+         */
+        session_list.load_sessions();
+        cluster_list.load_list();
+        if (terminal_list) {
+            terminal_list.load_terminals();
         }
         if (!interval_id){
             interval_id = setInterval(function(){
-                    if($('.upload_button').length === 0)
-                    {
-                        session_list.load_sessions();
-                        cluster_list.load_list();
-                    }
-                }, time_refresh*1000);
-            }
+                session_list.load_sessions();
+                cluster_list.load_list();
+                if (terminal_list) {
+                    terminal_list.load_terminals();
+                }
+            }, time_refresh*1000);
+        }
     };
 
     var disable_autorefresh = function(){
@@ -100,6 +130,7 @@ require([
     IPython.session_list = session_list;
     IPython.kernel_list = kernel_list;
     IPython.login_widget = login_widget;
+    IPython.new_notebook_widget = nnw;
 
     events.trigger('app_initialized.DashboardApp');
     
@@ -109,13 +140,23 @@ require([
     });
     
     // set hash on tab click
-    $("#tabs").find("a").click(function() {
-        window.location.hash = $(this).attr("href");
+    $("#tabs").find("a").click(function(e) {
+        // Prevent the document from jumping when the active tab is changed to a 
+        // tab that has a lot of content.
+        e.preventDefault();
+
+        // Set the hash without causing the page to jump.
+        // http://stackoverflow.com/a/14690177/2824256
+        var hash = $(this).attr("href");
+        if(window.history.pushState) {
+            window.history.pushState(null, null, hash);
+        } else {
+            window.location.hash = hash;
+        }
     });
     
     // load tab if url hash
     if (window.location.hash) {
         $("#tabs").find("a[href=" + window.location.hash + "]").click();
     }
-
 });

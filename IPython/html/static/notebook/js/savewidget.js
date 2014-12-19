@@ -7,15 +7,18 @@ define([
     'base/js/utils',
     'base/js/dialog',
     'base/js/keyboard',
-    'dateformat',
-], function(IPython, $, utils, dialog, keyboard, dateformat) {
+    'moment',
+], function(IPython, $, utils, dialog, keyboard, moment) {
     "use strict";
 
     var SaveWidget = function (selector, options) {
-        // TODO: Remove circular ref.
+        /**
+         * TODO: Remove circular ref.
+         */
         this.notebook = undefined;
         this.selector = selector;
         this.events = options.events;
+        this._checkpoint_date = undefined;
         this.keyboard_manager = options.keyboard_manager;
         if (this.selector !== undefined) {
             this.element = $(selector);
@@ -26,13 +29,8 @@ define([
 
     SaveWidget.prototype.bind_events = function () {
         var that = this;
-        this.element.find('span#notebook_name').click(function () {
-            that.rename_notebook();
-        });
-        this.element.find('span#notebook_name').hover(function () {
-            $(this).addClass("ui-state-hover");
-        }, function () {
-            $(this).removeClass("ui-state-hover");
+        this.element.find('span.filename').click(function () {
+            that.rename_notebook({notebook: that.notebook});
         });
         this.events.on('notebook_loaded.Notebook', function () {
             that.update_notebook_name();
@@ -50,12 +48,17 @@ define([
         this.events.on('notebook_save_failed.Notebook', function () {
             that.set_save_status('Autosave Failed!');
         });
+        this.events.on('notebook_read_only.Notebook', function () {
+            that.set_save_status('(read only)');
+            // disable future set_save_status
+            that.set_save_status = function () {};
+        });
         this.events.on('checkpoints_listed.Notebook', function (event, data) {
-            that.set_last_checkpoint(data[0]);
+            that._set_last_checkpoint(data[0]);
         });
 
         this.events.on('checkpoint_created.Notebook', function (event, data) {
-            that.set_last_checkpoint(data);
+            that._set_last_checkpoint(data);
         });
         this.events.on('set_dirty.Notebook', function (event, data) {
             that.set_autosaved(data.value);
@@ -73,41 +76,53 @@ define([
             $("<br/>")
         ).append(
             $('<input/>').attr('type','text').attr('size','25').addClass('form-control')
-            .val(that.notebook.get_notebook_name())
+            .val(options.notebook.get_notebook_name())
         );
-        dialog.modal({
+        var d = dialog.modal({
             title: "Rename Notebook",
             body: dialog_body,
             notebook: options.notebook,
             keyboard_manager: this.keyboard_manager,
             buttons : {
-                "Cancel": {},
                 "OK": {
                     class: "btn-primary",
                     click: function () {
-                    var new_name = $(this).find('input').val();
-                    if (!that.notebook.test_notebook_name(new_name)) {
-                        $(this).find('.rename-message').text(
-                            "Invalid notebook name. Notebook names must "+
-                            "have 1 or more characters and can contain any characters " +
-                            "except :/\\. Please enter a new notebook name:"
-                        );
-                        return false;
-                    } else {
-                        that.notebook.rename(new_name);
+                        var new_name = d.find('input').val();
+                        if (!options.notebook.test_notebook_name(new_name)) {
+                            d.find('.rename-message').text(
+                                "Invalid notebook name. Notebook names must "+
+                                "have 1 or more characters and can contain any characters " +
+                                "except :/\\. Please enter a new notebook name:"
+                            );
+                            return false;
+                        } else {
+                            d.find('.rename-message').text("Renaming...");
+                            d.find('input[type="text"]').prop('disabled', true);
+                            that.notebook.rename(new_name).then(
+                                function () {
+                                    d.modal('hide');
+                                }, function (error) {
+                                    d.find('.rename-message').text(error.message || 'Unknown error');
+                                    d.find('input[type="text"]').prop('disabled', false).focus().select();
+                                }
+                            );
+                            return false;
+                        }
                     }
-                }}
                 },
-            open : function (event, ui) {
-                var that = $(this);
-                // Upon ENTER, click the OK button.
-                that.find('input[type="text"]').keydown(function (event, ui) {
+                "Cancel": {}
+                },
+            open : function () {
+                /**
+                 * Upon ENTER, click the OK button.
+                 */
+                d.find('input[type="text"]').keydown(function (event) {
                     if (event.which === keyboard.keycodes.enter) {
-                        that.find('.btn-primary').first().click();
+                        d.find('.btn-primary').first().click();
                         return false;
                     }
                 });
-                that.find('input[type="text"]').focus().select();
+                d.find('input[type="text"]').focus().select();
             }
         });
     };
@@ -115,7 +130,7 @@ define([
 
     SaveWidget.prototype.update_notebook_name = function () {
         var nbname = this.notebook.get_notebook_name();
-        this.element.find('span#notebook_name').text(nbname);
+        this.element.find('span.filename').text(nbname);
     };
 
 
@@ -123,37 +138,74 @@ define([
         var nbname = this.notebook.get_notebook_name();
         document.title = nbname;
     };
-    
+
     SaveWidget.prototype.update_address_bar = function(){
         var base_url = this.notebook.base_url;
-        var nbname = this.notebook.notebook_name;
         var path = this.notebook.notebook_path;
-        var state = {path : path, name: nbname};
+        var state = {path : path};
         window.history.replaceState(state, "", utils.url_join_encode(
             base_url,
             "notebooks",
-            path,
-            nbname)
+            path)
         );
     };
 
 
     SaveWidget.prototype.set_save_status = function (msg) {
-        this.element.find('span#autosave_status').text(msg);
+        this.element.find('span.autosave_status').text(msg);
     };
 
-    SaveWidget.prototype.set_checkpoint_status = function (msg) {
-        this.element.find('span#checkpoint_status').text(msg);
+    SaveWidget.prototype._set_last_checkpoint = function (checkpoint) {
+        if (checkpoint) {
+            this._checkpoint_date = new Date(checkpoint.last_modified);
+        } else {
+            this._checkpoint_date = null;
+        }
+        this._render_checkpoint();
     };
-
-    SaveWidget.prototype.set_last_checkpoint = function (checkpoint) {
-        if (!checkpoint) {
-            this.set_checkpoint_status("");
+    
+    SaveWidget.prototype._render_checkpoint = function () {
+        /** actually set the text in the element, from our _checkpoint value
+        
+        called directly, and periodically in timeouts.
+        */
+        this._schedule_render_checkpoint();
+        var el = this.element.find('span.checkpoint_status');
+        if (!this._checkpoint_date) {
+            el.text('').attr('title', 'no checkpoint');
             return;
         }
-        var d = new Date(checkpoint.last_modified);
-        this.set_checkpoint_status(
-            "Last Checkpoint: " + dateformat(d,'mmm dd HH:MM')
+        var chkd = moment(this._checkpoint_date);
+        var long_date = chkd.format('llll');
+        var human_date;
+        var tdelta = Math.ceil(new Date() - this._checkpoint_date);
+        if (tdelta < utils.time.milliseconds.d){
+            // less than 24 hours old, use relative date
+            human_date = chkd.fromNow();
+        } else {
+            // otherwise show calendar 
+            // <Today | yesterday|...> at hh,mm,ss
+            human_date = chkd.calendar();
+        }
+        el.text('Last Checkpoint: ' + human_date).attr('title', long_date);
+    };
+
+    
+    SaveWidget.prototype._schedule_render_checkpoint = function () {
+        /** schedule the next update to relative date
+        
+        periodically updated, so short values like 'a few seconds ago' don't get stale.
+        */
+        if (!this._checkpoint_date) {
+            return;
+        }
+        if ((this._checkpoint_timeout)) {
+            clearTimeout(this._checkpoint_timeout);
+        }
+        var dt = Math.ceil(new Date() - this._checkpoint_date);
+        this._checkpoint_timeout = setTimeout(
+            $.proxy(this._render_checkpoint, this),
+            utils.time.timeout_from_dt(dt)
         );
     };
 

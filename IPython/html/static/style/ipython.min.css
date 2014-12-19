@@ -187,6 +187,26 @@ Browsers not listed, including Safari, are supported via the styling under the
   /* Modern browsers */
   justify-content: center;
 }
+.hbox.baseline,
+.vbox.baseline,
+.baseline {
+  /* Old browsers */
+  -webkit-box-pack: baseline;
+  -moz-box-pack: baseline;
+  box-pack: baseline;
+  /* Modern browsers */
+  justify-content: baseline;
+}
+.hbox.stretch,
+.vbox.stretch,
+.stretch {
+  /* Old browsers */
+  -webkit-box-pack: stretch;
+  -moz-box-pack: stretch;
+  box-pack: stretch;
+  /* Modern browsers */
+  justify-content: stretch;
+}
 .hbox.align-start,
 .vbox.align-start,
 .align-start {
@@ -216,6 +236,26 @@ Browsers not listed, including Safari, are supported via the styling under the
   box-align: center;
   /* Modern browsers */
   align-items: center;
+}
+.hbox.align-baseline,
+.vbox.align-baseline,
+.align-baseline {
+  /* Old browsers */
+  -webkit-box-align: baseline;
+  -moz-box-align: baseline;
+  box-align: baseline;
+  /* Modern browsers */
+  align-items: baseline;
+}
+.hbox.align-stretch,
+.vbox.align-stretch,
+.align-stretch {
+  /* Old browsers */
+  -webkit-box-align: stretch;
+  -moz-box-align: stretch;
+  box-align: stretch;
+  /* Modern browsers */
+  align-items: stretch;
 }
 div.error {
   margin: 2em;
@@ -254,7 +294,7 @@ div.traceback-wrapper {
   color: darkgreen;
 }
 .ansiyellow {
-  color: brown;
+  color: #c4a000;
 }
 .ansiblue {
   color: darkblue;
@@ -309,12 +349,6 @@ div.cell {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
   border-radius: 4px;
   box-sizing: border-box;
   -moz-box-sizing: border-box;
@@ -329,9 +363,21 @@ div.cell {
 }
 div.cell.selected {
   border-color: #ababab;
+  /* Don't border the cells when printing */
+}
+@media print {
+  div.cell.selected {
+    border-color: transparent;
+  }
 }
 div.cell.edit_mode {
   border-color: green;
+  /* Don't border the cells when printing */
+}
+@media print {
+  div.cell.edit_mode {
+    border-color: transparent;
+  }
 }
 div.prompt {
   /* This needs to be wide enough for 3 digit prompt numbers: In[100]: */
@@ -365,12 +411,6 @@ div.inner_cell {
   flex-direction: column;
   align-items: stretch;
   /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
-  /* Old browsers */
   -webkit-box-flex: 1;
   -moz-box-flex: 1;
   box-flex: 1;
@@ -391,6 +431,52 @@ div.prompt:empty {
   padding-top: 0;
   padding-bottom: 0;
 }
+div.unrecognized_cell {
+  padding: 5px 5px 5px 0px;
+  /* Old browsers */
+  display: -webkit-box;
+  -webkit-box-orient: horizontal;
+  -webkit-box-align: stretch;
+  display: -moz-box;
+  -moz-box-orient: horizontal;
+  -moz-box-align: stretch;
+  display: box;
+  box-orient: horizontal;
+  box-align: stretch;
+  /* Modern browsers */
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+div.unrecognized_cell .inner_cell {
+  border-radius: 4px;
+  padding: 5px;
+  font-weight: bold;
+  color: red;
+  border: 1px solid #cfcfcf;
+  background: #eaeaea;
+}
+div.unrecognized_cell .inner_cell a {
+  color: inherit;
+  text-decoration: none;
+}
+div.unrecognized_cell .inner_cell a:hover {
+  color: inherit;
+  text-decoration: none;
+}
+@media (max-width: 480px) {
+  div.unrecognized_cell > div.prompt {
+    display: none;
+  }
+}
+div.code_cell {
+  /* avoid page breaking on code cells when printing */
+}
+@media print {
+  div.code_cell {
+    page-break-inside: avoid;
+  }
+}
 /* any special styling for code cells that are currently running goes here */
 div.input {
   page-break-inside: avoid;
@@ -408,12 +494,6 @@ div.input {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
 }
 @media (max-width: 480px) {
   div.input {
@@ -431,17 +511,11 @@ div.input {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    /* Old browsers */
-    -webkit-box-flex: 0;
-    -moz-box-flex: 0;
-    box-flex: 0;
-    /* Modern browsers */
-    flex: none;
   }
 }
 /* input_area and input_prompt must match in top border and margin for alignment */
 div.input_prompt {
-  color: #000080;
+  color: navy;
   border-top: 1px solid transparent;
 }
 div.input_area > div.highlight {
@@ -509,144 +583,102 @@ Original style from softwaremaniacs.org (c) Ivan Sagalaev <Maniac@SoftwareManiac
 Adapted from GitHub theme
 
 */
-pre code {
-  display: block;
-  padding: 0.5em;
+.highlight-base {
+  color: #000000;
 }
-.highlight-base,
-pre code,
-pre .subst,
-pre .tag .title,
-pre .lisp .title,
-pre .clojure .built_in,
-pre .nginx .title {
-  color: black;
+.highlight-variable {
+  color: #000000;
 }
-.highlight-string,
-pre .string,
-pre .constant,
-pre .parent,
-pre .tag .value,
-pre .rules .value,
-pre .rules .value .number,
-pre .preprocessor,
-pre .ruby .symbol,
-pre .ruby .symbol .string,
-pre .aggregate,
-pre .template_tag,
-pre .django .variable,
-pre .smalltalk .class,
-pre .addition,
-pre .flow,
-pre .stream,
-pre .bash .variable,
-pre .apache .tag,
-pre .apache .cbracket,
-pre .tex .command,
-pre .tex .special,
-pre .erlang_repl .function_or_atom,
-pre .markdown .header {
+.highlight-variable-2 {
+  color: #1a1a1a;
+}
+.highlight-variable-3 {
+  color: #333333;
+}
+.highlight-string {
   color: #BA2121;
 }
-.highlight-comment,
-pre .comment,
-pre .annotation,
-pre .template_comment,
-pre .diff .header,
-pre .chunk,
-pre .markdown .blockquote {
+.highlight-comment {
   color: #408080;
   font-style: italic;
 }
-.highlight-number,
-pre .number,
-pre .date,
-pre .regexp,
-pre .literal,
-pre .smalltalk .symbol,
-pre .smalltalk .char,
-pre .go .constant,
-pre .change,
-pre .markdown .bullet,
-pre .markdown .link_url {
+.highlight-number {
   color: #080;
 }
-pre .label,
-pre .javadoc,
-pre .ruby .string,
-pre .decorator,
-pre .filter .argument,
-pre .localvars,
-pre .array,
-pre .attr_selector,
-pre .important,
-pre .pseudo,
-pre .pi,
-pre .doctype,
-pre .deletion,
-pre .envvar,
-pre .shebang,
-pre .apache .sqbracket,
-pre .nginx .built_in,
-pre .tex .formula,
-pre .erlang_repl .reserved,
-pre .prompt,
-pre .markdown .link_label,
-pre .vhdl .attribute,
-pre .clojure .attribute,
-pre .coffeescript .property {
-  color: #8888ff;
+.highlight-atom {
+  color: #88F;
 }
-.highlight-keyword,
-pre .keyword,
-pre .id,
-pre .phpdoc,
-pre .aggregate,
-pre .css .tag,
-pre .javadoctag,
-pre .phpdoc,
-pre .yardoctag,
-pre .smalltalk .class,
-pre .winutils,
-pre .bash .variable,
-pre .apache .tag,
-pre .go .typename,
-pre .tex .command,
-pre .markdown .strong,
-pre .request,
-pre .status {
+.highlight-keyword {
   color: #008000;
   font-weight: bold;
 }
-.highlight-builtin,
-pre .built_in {
+.highlight-builtin {
   color: #008000;
 }
-pre .markdown .emphasis {
-  font-style: italic;
+.highlight-error {
+  color: #f00;
 }
-pre .nginx .built_in {
-  font-weight: normal;
+.highlight-operator {
+  color: #AA22FF;
+  font-weight: bold;
 }
-pre .coffeescript .javascript,
-pre .javascript .xml,
-pre .tex .formula,
-pre .xml .javascript,
-pre .xml .vbscript,
-pre .xml .css,
-pre .xml .cdata {
-  opacity: 0.5;
+.highlight-meta {
+  color: #AA22FF;
+}
+/* previously not defined, copying from default codemirror */
+.highlight-def {
+  color: #00f;
+}
+.highlight-string-2 {
+  color: #f50;
+}
+.highlight-qualifier {
+  color: #555;
+}
+.highlight-bracket {
+  color: #997;
+}
+.highlight-tag {
+  color: #170;
+}
+.highlight-attribute {
+  color: #00c;
+}
+.highlight-header {
+  color: blue;
+}
+.highlight-quote {
+  color: #090;
+}
+.highlight-link {
+  color: #00c;
 }
 /* apply the same style to codemirror */
-.cm-s-ipython span.cm-variable {
-  color: black;
-}
 .cm-s-ipython span.cm-keyword {
   color: #008000;
   font-weight: bold;
 }
+.cm-s-ipython span.cm-atom {
+  color: #88F;
+}
 .cm-s-ipython span.cm-number {
   color: #080;
+}
+.cm-s-ipython span.cm-def {
+  color: #00f;
+}
+.cm-s-ipython span.cm-variable {
+  color: #000000;
+}
+.cm-s-ipython span.cm-operator {
+  color: #AA22FF;
+  font-weight: bold;
+}
+.cm-s-ipython span.cm-variable-2 {
+  color: #1a1a1a;
+}
+.cm-s-ipython span.cm-variable-3 {
+  color: #333333;
 }
 .cm-s-ipython span.cm-comment {
   color: #408080;
@@ -655,18 +687,38 @@ pre .xml .cdata {
 .cm-s-ipython span.cm-string {
   color: #BA2121;
 }
-.cm-s-ipython span.cm-builtin {
-  color: #008000;
-}
-.cm-s-ipython span.cm-error {
-  color: #f00;
-}
-.cm-s-ipython span.cm-operator {
-  color: #AA22FF;
-  font-weight: bold;
+.cm-s-ipython span.cm-string-2 {
+  color: #f50;
 }
 .cm-s-ipython span.cm-meta {
   color: #AA22FF;
+}
+.cm-s-ipython span.cm-qualifier {
+  color: #555;
+}
+.cm-s-ipython span.cm-builtin {
+  color: #008000;
+}
+.cm-s-ipython span.cm-bracket {
+  color: #997;
+}
+.cm-s-ipython span.cm-tag {
+  color: #170;
+}
+.cm-s-ipython span.cm-attribute {
+  color: #00c;
+}
+.cm-s-ipython span.cm-header {
+  color: blue;
+}
+.cm-s-ipython span.cm-quote {
+  color: #090;
+}
+.cm-s-ipython span.cm-link {
+  color: #00c;
+}
+.cm-s-ipython span.cm-error {
+  color: #f00;
 }
 .cm-s-ipython span.cm-tab {
   background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAMCAYAAAAkuj5RAAAAAXNSR0IArs4c6QAAAGFJREFUSMft1LsRQFAQheHPowAKoACx3IgEKtaEHujDjORSgWTH/ZOdnZOcM/sgk/kFFWY0qV8foQwS4MKBCS3qR6ixBJvElOobYAtivseIE120FaowJPN75GMu8j/LfMwNjh4HUpwg4LUAAAAASUVORK5CYII=);
@@ -690,12 +742,6 @@ div.output_wrapper {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
 }
 /* class for the output area when it should be height-limited */
 div.output_scroll {
@@ -727,12 +773,6 @@ div.output_collapsed {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
 }
 div.out_prompt_overlay {
   height: 100%;
@@ -747,7 +787,7 @@ div.out_prompt_overlay:hover {
   background: rgba(240, 240, 240, 0.5);
 }
 div.output_prompt {
-  color: #8b0000;
+  color: darkred;
 }
 /* This class is the outer container of all output sections. */
 div.output_area {
@@ -767,12 +807,6 @@ div.output_area {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
 }
 div.output_area .MathJax_Display {
   text-align: left !important;
@@ -802,12 +836,6 @@ div.output_area .rendered_html img {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
 }
 @media (max-width: 480px) {
   div.output_area {
@@ -825,12 +853,6 @@ div.output_area .rendered_html img {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    /* Old browsers */
-    -webkit-box-flex: 0;
-    -moz-box-flex: 0;
-    box-flex: 0;
-    /* Modern browsers */
-    flex: none;
   }
 }
 div.output_area pre {
@@ -838,7 +860,7 @@ div.output_area pre {
   padding: 0;
   border: 0;
   vertical-align: baseline;
-  color: #000000;
+  color: black;
   background-color: transparent;
   border-radius: 0;
 }
@@ -901,6 +923,19 @@ input.raw_input:focus {
 }
 p.p-space {
   margin-bottom: 10px;
+}
+div.output_unrecognized {
+  padding: 5px;
+  font-weight: bold;
+  color: red;
+}
+div.output_unrecognized a {
+  color: inherit;
+  text-decoration: none;
+}
+div.output_unrecognized a:hover {
+  color: inherit;
+  text-decoration: none;
 }
 .rendered_html {
   color: #000000;
@@ -1018,8 +1053,8 @@ p.p-space {
   margin-top: 1em;
 }
 .rendered_html hr {
-  color: #000000;
-  background-color: #000000;
+  color: black;
+  background-color: black;
 }
 .rendered_html pre {
   margin: 1em 2em;
@@ -1038,13 +1073,13 @@ p.p-space {
 .rendered_html table {
   margin-left: auto;
   margin-right: auto;
-  border: 1px solid #000000;
+  border: 1px solid black;
   border-collapse: collapse;
 }
 .rendered_html tr,
 .rendered_html th,
 .rendered_html td {
-  border: 1px solid #000000;
+  border: 1px solid black;
   border-collapse: collapse;
   margin: 1em 2em;
 }
@@ -1090,12 +1125,6 @@ div.text_cell {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
 }
 @media (max-width: 480px) {
   div.text_cell > div.prompt {
@@ -1127,36 +1156,39 @@ h5:hover .anchor-link,
 h6:hover .anchor-link {
   visibility: visible;
 }
-div.cell.text_cell.rendered {
-  padding: 0px;
+.text_cell.rendered .input_area {
+  display: none;
 }
-.cm-s-heading-1,
-.cm-s-heading-2,
-.cm-s-heading-3,
-.cm-s-heading-4,
-.cm-s-heading-5,
-.cm-s-heading-6 {
+.text_cell.unrendered .text_cell_render {
+  display: none;
+}
+.cm-header-1,
+.cm-header-2,
+.cm-header-3,
+.cm-header-4,
+.cm-header-5,
+.cm-header-6 {
   font-weight: bold;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
-.cm-s-heading-1 {
-  font-size: 150%;
+.cm-header-1 {
+  font-size: 185.7%;
 }
-.cm-s-heading-2 {
-  font-size: 130%;
+.cm-header-2 {
+  font-size: 157.1%;
 }
-.cm-s-heading-3 {
-  font-size: 120%;
+.cm-header-3 {
+  font-size: 128.6%;
 }
-.cm-s-heading-4 {
+.cm-header-4 {
   font-size: 110%;
 }
-.cm-s-heading-5 {
+.cm-header-5 {
   font-size: 100%;
   font-style: italic;
 }
-.cm-s-heading-6 {
-  font-size: 90%;
+.cm-header-6 {
+  font-size: 100%;
   font-style: italic;
 }
 .widget-area {
@@ -1189,12 +1221,6 @@ div.cell.text_cell.rendered {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
 }
 .widget-area .widget-subarea {
   padding: 0.44em 0.4em 0.4em 1px;
@@ -1217,12 +1243,6 @@ div.cell.text_cell.rendered {
   flex-direction: column;
   align-items: stretch;
   /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
-  /* Old browsers */
   -webkit-box-flex: 2;
   -moz-box-flex: 2;
   box-flex: 2;
@@ -1237,32 +1257,6 @@ div.cell.text_cell.rendered {
 }
 /* THE CLASSES BELOW CAN APPEAR ANYWHERE IN THE DOM (POSSIBLEY OUTSIDE OF
    THE WIDGET AREA). */
-.widget-hlabel {
-  /* Horizontal Label */
-  min-width: 10ex;
-  padding-right: 8px;
-  padding-top: 5px;
-  text-align: right;
-  vertical-align: text-top;
-}
-.widget-vlabel {
-  /* Vertical Label */
-  padding-bottom: 5px;
-  text-align: center;
-  vertical-align: text-bottom;
-}
-.widget-hreadout {
-  padding-left: 8px;
-  padding-top: 5px;
-  text-align: left;
-  vertical-align: text-top;
-}
-.widget-vreadout {
-  /* Vertical Label */
-  padding-top: 5px;
-  text-align: center;
-  vertical-align: text-top;
-}
 .slide-track {
   /* Slider Track */
   border: 1px solid #CCCCCC;
@@ -1322,12 +1316,6 @@ div.cell.text_cell.rendered {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
 }
 .widget-hslider .ui-slider {
   /* Inner, invisible slide div */
@@ -1348,12 +1336,6 @@ div.cell.text_cell.rendered {
   flex-direction: row;
   align-items: stretch;
   /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
-  /* Old browsers */
   -webkit-box-flex: 1;
   -moz-box-flex: 1;
   box-flex: 1;
@@ -1364,6 +1346,10 @@ div.cell.text_cell.rendered {
   width: 14px !important;
   height: 28px !important;
   margin-top: -8px !important;
+}
+.widget-hslider .ui-slider .ui-slider-range {
+  height: 12px !important;
+  margin-top: -4px !important;
 }
 .widget-vslider {
   /* Vertical jQuery Slider */
@@ -1397,12 +1383,6 @@ div.cell.text_cell.rendered {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
 }
 .widget-vslider .ui-slider {
   /* Inner, invisible slide div */
@@ -1425,12 +1405,6 @@ div.cell.text_cell.rendered {
   flex-direction: column;
   align-items: stretch;
   /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
-  /* Old browsers */
   -webkit-box-flex: 1;
   -moz-box-flex: 1;
   box-flex: 1;
@@ -1442,10 +1416,14 @@ div.cell.text_cell.rendered {
   height: 14px !important;
   margin-left: -9px;
 }
+.widget-vslider .ui-slider .ui-slider-range {
+  width: 12px !important;
+  margin-left: -1px !important;
+}
 .widget-text {
   /* String Textbox - used for TextBoxView and TextAreaView */
   width: 350px;
-  margin: 0px !important;
+  margin: 0px;
 }
 .widget-listbox {
   /* Listbox */
@@ -1455,7 +1433,7 @@ div.cell.text_cell.rendered {
 .widget-numeric-text {
   /* Single Line Textbox - used for IntTextView and FloatTextView */
   width: 150px;
-  margin: 0px !important;
+  margin: 0px;
 }
 .widget-progress {
   /* Progress Bar */
@@ -1474,66 +1452,11 @@ div.cell.text_cell.rendered {
   /* ComboBox Main Button */
   min-width: 125px;
 }
-.widget-box {
-  /* The following section sets the style for the invisible div that
-    hold widgets and their accompanying labels.
-
-    Looks like this:
-    +-----------------------------+
-    | widget-box (or similar)     |
-    |  +-------+---------------+  |
-    |  | Label | Actual Widget |  |
-    |  +-------+---------------+  |
-    +-----------------------------+
-    */
-  margin: 5px;
-  /* Old browsers */
-  -webkit-box-pack: start;
-  -moz-box-pack: start;
-  box-pack: start;
-  /* Modern browsers */
-  justify-content: flex-start;
-  /* ContainerWidget */
-  box-sizing: border-box;
-  -moz-box-sizing: border-box;
-  -webkit-box-sizing: border-box;
-  /* Old browsers */
-  -webkit-box-align: start;
-  -moz-box-align: start;
-  box-align: start;
-  /* Modern browsers */
-  align-items: flex-start;
+.widget_item .dropdown-menu li a {
+  color: inherit;
 }
 .widget-hbox {
   /* Horizontal widgets */
-  /* The following section sets the style for the invisible div that
-    hold widgets and their accompanying labels.
-
-    Looks like this:
-    +-----------------------------+
-    | widget-box (or similar)     |
-    |  +-------+---------------+  |
-    |  | Label | Actual Widget |  |
-    |  +-------+---------------+  |
-    +-----------------------------+
-    */
-  margin: 5px;
-  /* Old browsers */
-  -webkit-box-pack: start;
-  -moz-box-pack: start;
-  box-pack: start;
-  /* Modern browsers */
-  justify-content: flex-start;
-  /* ContainerWidget */
-  box-sizing: border-box;
-  -moz-box-sizing: border-box;
-  -webkit-box-sizing: border-box;
-  /* Old browsers */
-  -webkit-box-align: start;
-  -moz-box-align: start;
-  box-align: start;
-  /* Modern browsers */
-  align-items: flex-start;
   /* Old browsers */
   display: -webkit-box;
   -webkit-box-orient: horizontal;
@@ -1548,99 +1471,27 @@ div.cell.text_cell.rendered {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
 }
-.widget-hbox-single {
-  /* Single line horizontal widgets */
-  /* Horizontal widgets */
-  /* The following section sets the style for the invisible div that
-    hold widgets and their accompanying labels.
-
-    Looks like this:
-    +-----------------------------+
-    | widget-box (or similar)     |
-    |  +-------+---------------+  |
-    |  | Label | Actual Widget |  |
-    |  +-------+---------------+  |
-    +-----------------------------+
-    */
-  margin: 5px;
-  /* Old browsers */
-  -webkit-box-pack: start;
-  -moz-box-pack: start;
-  box-pack: start;
-  /* Modern browsers */
-  justify-content: flex-start;
-  /* ContainerWidget */
-  box-sizing: border-box;
-  -moz-box-sizing: border-box;
-  -webkit-box-sizing: border-box;
-  /* Old browsers */
-  -webkit-box-align: start;
-  -moz-box-align: start;
-  box-align: start;
-  /* Modern browsers */
-  align-items: flex-start;
-  /* Old browsers */
-  display: -webkit-box;
-  -webkit-box-orient: horizontal;
-  -webkit-box-align: stretch;
-  display: -moz-box;
-  -moz-box-orient: horizontal;
-  -moz-box-align: stretch;
-  display: box;
-  box-orient: horizontal;
-  box-align: stretch;
-  /* Modern browsers */
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
-  height: 30px;
-}
-.widget-hbox-single input[type="checkbox"] {
+.widget-hbox input[type="checkbox"] {
   margin-top: 9px;
+  margin-bottom: 10px;
+}
+.widget-hbox .widget-label {
+  /* Horizontal Label */
+  min-width: 10ex;
+  padding-right: 8px;
+  padding-top: 5px;
+  text-align: right;
+  vertical-align: text-top;
+}
+.widget-hbox .widget-readout {
+  padding-left: 8px;
+  padding-top: 5px;
+  text-align: left;
+  vertical-align: text-top;
 }
 .widget-vbox {
   /* Vertical widgets */
-  /* The following section sets the style for the invisible div that
-    hold widgets and their accompanying labels.
-
-    Looks like this:
-    +-----------------------------+
-    | widget-box (or similar)     |
-    |  +-------+---------------+  |
-    |  | Label | Actual Widget |  |
-    |  +-------+---------------+  |
-    +-----------------------------+
-    */
-  margin: 5px;
-  /* Old browsers */
-  -webkit-box-pack: start;
-  -moz-box-pack: start;
-  box-pack: start;
-  /* Modern browsers */
-  justify-content: flex-start;
-  /* ContainerWidget */
-  box-sizing: border-box;
-  -moz-box-sizing: border-box;
-  -webkit-box-sizing: border-box;
-  /* Old browsers */
-  -webkit-box-align: start;
-  -moz-box-align: start;
-  box-align: start;
-  /* Modern browsers */
-  align-items: flex-start;
   /* Old browsers */
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -1655,68 +1506,21 @@ div.cell.text_cell.rendered {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
 }
-.widget-vbox-single {
-  /* For vertical slides */
-  /* Vertical widgets */
-  /* The following section sets the style for the invisible div that
-    hold widgets and their accompanying labels.
-
-    Looks like this:
-    +-----------------------------+
-    | widget-box (or similar)     |
-    |  +-------+---------------+  |
-    |  | Label | Actual Widget |  |
-    |  +-------+---------------+  |
-    +-----------------------------+
-    */
-  margin: 5px;
-  /* Old browsers */
-  -webkit-box-pack: start;
-  -moz-box-pack: start;
-  box-pack: start;
-  /* Modern browsers */
-  justify-content: flex-start;
-  /* ContainerWidget */
-  box-sizing: border-box;
-  -moz-box-sizing: border-box;
-  -webkit-box-sizing: border-box;
-  /* Old browsers */
-  -webkit-box-align: start;
-  -moz-box-align: start;
-  box-align: start;
-  /* Modern browsers */
-  align-items: flex-start;
-  /* Old browsers */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-box-align: stretch;
-  display: -moz-box;
-  -moz-box-orient: vertical;
-  -moz-box-align: stretch;
-  display: box;
-  box-orient: vertical;
-  box-align: stretch;
-  /* Modern browsers */
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
-  width: 30px;
+.widget-vbox .widget-label {
+  /* Vertical Label */
+  padding-bottom: 5px;
+  text-align: center;
+  vertical-align: text-bottom;
+}
+.widget-vbox .widget-readout {
+  /* Vertical Label */
+  padding-top: 5px;
+  text-align: center;
+  vertical-align: text-top;
 }
 .widget-modal {
-  /* ContainerWidget - ModalView */
+  /* Box - ModalView */
   overflow: hidden;
   position: absolute !important;
   top: 0px;
@@ -1724,11 +1528,11 @@ div.cell.text_cell.rendered {
   margin-left: 0px !important;
 }
 .widget-modal-body {
-  /* ContainerWidget - ModalView Body */
+  /* Box - ModalView Body */
   max-height: none !important;
 }
-.widget-container {
-  /* ContainerWidget */
+.widget-box {
+  /* Box */
   box-sizing: border-box;
   -moz-box-sizing: border-box;
   -webkit-box-sizing: border-box;
@@ -1755,12 +1559,6 @@ div.cell.text_cell.rendered {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  /* Old browsers */
-  -webkit-box-flex: 0;
-  -moz-box-flex: 0;
-  box-flex: 0;
-  /* Modern browsers */
-  flex: none;
   box-sizing: border-box;
   -moz-box-sizing: border-box;
   -webkit-box-sizing: border-box;
@@ -1777,4 +1575,4 @@ div.cell.text_cell.rendered {
   left: 0px !important;
   margin-left: 0px !important;
 }
-/*# sourceMappingURL=../style/ipython.min.css.map */
+/*# sourceMappingURL=ipython.min.css.map */

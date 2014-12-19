@@ -53,11 +53,8 @@ kernel_aliases.update({
     'stdin' : 'IPKernelApp.stdin_port',
     'control' : 'IPKernelApp.control_port',
     'f' : 'IPKernelApp.connection_file',
-    'parent': 'IPKernelApp.parent_handle',
     'transport': 'IPKernelApp.transport',
 })
-if sys.platform.startswith('win'):
-    kernel_aliases['interrupt'] = 'IPKernelApp.interrupt'
 
 kernel_flags = dict(base_flags)
 kernel_flags.update({
@@ -97,7 +94,7 @@ To read more about this, see https://github.com/ipython/ipython/issues/2049
 
 class IPKernelApp(BaseIPythonApplication, InteractiveShellApp,
         ConnectionFileMixin):
-    name='ipkernel'
+    name='ipython-kernel'
     aliases = Dict(kernel_aliases)
     flags = Dict(kernel_flags)
     classes = [IPythonKernel, ZMQInteractiveShell, ProfileDir, Session]
@@ -113,10 +110,6 @@ class IPKernelApp(BaseIPythonApplication, InteractiveShellApp,
     poller = Any() # don't restrict this even though current pollers are all Threads
     heartbeat = Instance(Heartbeat)
     ports = Dict()
-    
-    # ipkernel doesn't get its own config file
-    def _config_file_name_default(self):
-        return 'ipython_config.py'
     
     # connection info:
     
@@ -137,11 +130,11 @@ class IPKernelApp(BaseIPythonApplication, InteractiveShellApp,
         config=True, help="The importstring for the DisplayHook factory")
 
     # polling
-    parent_handle = Integer(0, config=True,
+    parent_handle = Integer(int(os.environ.get('JPY_PARENT_PID') or 0), config=True,
         help="""kill this process if its parent dies.  On Windows, the argument
         specifies the HANDLE of the parent process, otherwise it is simply boolean.
         """)
-    interrupt = Integer(0, config=True,
+    interrupt = Integer(int(os.environ.get('JPY_INTERRUPT_EVENT') or 0), config=True,
         help="""ONLY USED ON WINDOWS
         Interrupt this process when the parent is signaled.
         """)
@@ -306,7 +299,7 @@ class IPKernelApp(BaseIPythonApplication, InteractiveShellApp,
         shell_stream = ZMQStream(self.shell_socket)
         control_stream = ZMQStream(self.control_socket)
         
-        kernel_factory = self.kernel_class
+        kernel_factory = self.kernel_class.instance
 
         kernel = kernel_factory(parent=self, session=self.session,
                                 shell_streams=[shell_stream, control_stream],

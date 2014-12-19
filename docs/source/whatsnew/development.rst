@@ -10,12 +10,50 @@ This document describes in-flight development work.
     conflicts for other Pull Requests). Instead, create a new file in the
     `docs/source/whatsnew/pr` folder
 
+Using different kernels
+-----------------------
+
+.. image:: ../_images/kernel_selector_screenshot.png
+   :alt: Screenshot of notebook kernel selection dropdown menu
+   :align: center
+
+You can now choose a kernel for a notebook within the user interface, rather
+than starting up a separate notebook server for each kernel you want to use. The
+syntax highlighting adapts to match the language you're working in.
+
+Information about the kernel is stored in the notebook file, so when you open a
+notebook, it will automatically start the correct kernel.
+
+It is also easier to use the Qt console and the terminal console with other
+kernels, using the --kernel flag::
+
+    ipython qtconsole --kernel bash
+    ipython console --kernel bash
+
+    # To list available kernels
+    ipython kernelspec list
+
+Kernel authors should see :ref:`kernelspecs` for how to register their kernels
+with IPython so that these mechanisms work.
+
+Typing unicode identifiers
+--------------------------
+
+.. image:: /_images/unicode_completion.png
+
+Complex expressions can be much cleaner when written with a wider choice of
+characters. Python 3 allows unicode identifiers, and IPython 3 makes it easier
+to type those, using a feature from Julia. Type a backslash followed by a LaTeX
+style short name, such as ``\alpha``. Press tab, and it will turn into α.
+
+Other new features
+------------------
 
 * :class:`~.TextWidget` and :class:`~.TextareaWidget` objects now include a
   ``placeholder`` attribute, for displaying placeholder text before the
   user has typed anything.
 
-* The %load magic can now find the source for objects in the user namespace.
+* The :magic:`load` magic can now find the source for objects in the user namespace.
   To enable searching the namespace, use the ``-n`` option.
 
   .. sourcecode:: ipython
@@ -39,6 +77,49 @@ This document describes in-flight development work.
   To run a notebook and save its output in a new notebook::
 
       ipython nbconvert InputNotebook --ExecutePreprocessor.enabled=True --to notebook --output Executed
+
+* Consecutive stream (stdout/stderr) output is merged into a single output
+  in the notebook document.
+  Previously, all output messages were preserved as separate output fields in the JSON.
+  Now, the same merge is applied to the stored output as the displayed output,
+  improving document load time for notebooks with many small outputs.
+
+* ``NotebookApp.webapp_settings`` is deprecated and replaced with
+  the more informatively named ``NotebookApp.tornado_settings``.
+
+* Using :magic:`timeit` prints warnings if there is atleast a 4x difference in timings
+  between the slowest and fastest runs, since this might meant that the multiple
+  runs are not independent of one another.
+
+* It's now possible to provide mechanisms to integrate IPython with other event
+  loops, in addition to the ones we already support. This lets you run GUI code
+  in IPython with an interactive prompt, and to embed the IPython
+  kernel in GUI applications. See :doc:`/config/eventloops` for details. As part
+  of this, the direct ``enable_*`` and ``disable_*`` functions for various GUIs
+  in :mod:`IPython.lib.inputhook` have been deprecated in favour of
+  :meth:`~.InputHookManager.enable_gui` and :meth:`~.InputHookManager.disable_gui`.
+
+* A ``ScrollManager`` was added to the notebook.  The ``ScrollManager`` controls how the notebook document is scrolled using keyboard.  Users can inherit from the ``ScrollManager`` or ``TargetScrollManager`` to customize how their notebook scrolls.  The default ``ScrollManager`` is the ``SlideScrollManager``, which tries to scroll to the nearest slide or sub-slide cell.
+
+* The function :func:`~IPython.html.widgets.interaction.interact_manual` has been
+  added which behaves similarly to :func:`~IPython.html.widgets.interaction.interact`,
+  but adds a button to explicitly run the interacted-with function, rather than
+  doing it automatically for every change of the parameter widgets. This should
+  be useful for long-running functions.
+
+* The ``%cython`` magic is now part of the Cython module. Use `%load_ext Cython` with a version of Cython >= 0.21 to have access to the magic now.
+
+* The Notebook application now offers integrated terminals on Unix platforms,
+  intended for when it is used on a remote server. To enable these, install
+  the ``terminado`` Python package.
+
+* Setting the default highlighting language for nbconvert with the config option
+  ``NbConvertBase.default_language`` is deprecated. Nbconvert now respects
+  metadata stored in the :ref:`kernel spec <kernelspecs>`.
+
+* IPython can now be configured systemwide, with files in :file:`/etc/ipython`
+  or :file:`/usr/local/etc/ipython` on Unix systems,
+  or :file:`{%PROGRAMDATA%}\\ipython` on Windows.
 
 .. DO NOT EDIT THIS LINE BEFORE RELEASE. FEATURE INSERTION POINT.
 
@@ -74,19 +155,67 @@ Backwards incompatible changes
   IPython 3.0 trying to access `container` will raise an error in browser
   javascript console.
 
-IFrame embedding
-````````````````
+* ``IPython.utils.py3compat.open`` was removed: :func:`io.open` provides all
+  the same functionality.
 
-The IPython Notebook and its APIs by default will only be allowed to be
-embedded in an iframe on the same origin.
+* The NotebookManager and ``/api/notebooks`` service has been replaced by
+  a more generic ContentsManager and ``/api/contents`` service,
+  which supports all kinds of files.
+* The Dashboard now lists all files, not just notebooks and directories.
+* The ``--script`` hook for saving notebooks to Python scripts is removed,
+  use :samp:`ipython nbconvert --to python {notebook}` instead.
 
-To override this, set ``headers[X-Frame-Options]`` to one of
+* The ``rmagic`` extension is deprecated, as it is now part of rpy2. See
+  :mod:`rpy2.ipython.rmagic`.
 
-* DENY
-* SAMEORIGIN
-* ALLOW-FROM uri
+* :meth:`~.KernelManager.start_kernel` and :meth:`~.KernelManager.format_kernel_cmd`
+  no longer accept a ``executable`` parameter. Use the kernelspec machinery instead.
 
-See `Mozilla's guide to X-Frame-Options <https://developer.mozilla.org/en-US/docs/Web/HTTP/X-Frame-Options>`_ for more examples.
+* The widget classes have been renamed from `*Widget` to `*`.  The old names are
+  still functional, but are deprecated.  i.e. `IntSliderWidget` has been renamed
+  to `IntSlider`.
+* The ContainerWidget was renamed to Box and no longer defaults as a flexible
+  box in the web browser.  A new FlexBox widget was added, which allows you to
+  use the flexible box model.
 
 .. DO NOT EDIT THIS LINE BEFORE RELEASE. INCOMPAT INSERTION POINT.
 
+Content Security Policy
+```````````````````````
+
+The Content Security Policy is a web standard for adding a layer of security to
+detect and mitigate certain classes of attacks, including Cross Site Scripting
+(XSS) and data injection attacks. This was introduced into the notebook to
+ensure that the IPython Notebook and its APIs (by default) can only be embedded
+in an iframe on the same origin.
+
+Override ``headers['Content-Security-Policy']`` within your notebook
+configuration to extend for alternate domains and security settings.::
+
+    c.NotebookApp.tornado_settings = {
+        'headers': {
+            'Content-Security-Policy': "frame-ancestors 'self'"
+        }
+    }
+
+Example policies::
+
+    Content-Security-Policy: default-src 'self' https://*.jupyter.org
+
+Matches embeddings on any subdomain of jupyter.org, so long as they are served
+over SSL.
+
+There is a `report-uri <https://developer.mozilla.org/en-US/docs/Web/Security/CSP/CSP_policy_directives#report-uri>`_ endpoint available for logging CSP violations, located at
+``/api/security/csp-report``. To use it, set ``report-uri`` as part of the CSP::
+
+    c.NotebookApp.tornado_settings = {
+        'headers': {
+            'Content-Security-Policy': "frame-ancestors 'self'; report-uri /api/security/csp-report"
+        }
+    }
+
+It simply provides the CSP report as a warning in IPython's logs. The default
+CSP sets this report-uri relative to the ``base_url`` (not shown above).
+
+For a more thorough and accurate guide on Content Security Policies, check out
+`MDN's Using Content Security Policy <https://developer.mozilla.org/en-US/docs/Web/Security/CSP/Using_Content_Security_Policy>`_ for more examples.

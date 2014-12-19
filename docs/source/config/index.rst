@@ -27,5 +27,7 @@ Extending and integrating with IPython
 
    extensions/index
    integrating
+   custommagics
    inputtransforms
    callbacks
+   eventloops

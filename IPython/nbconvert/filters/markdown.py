@@ -21,6 +21,7 @@ from pygments.formatters import HtmlFormatter
 from pygments.util import ClassNotFound
 
 # IPython imports
+from IPython.nbconvert.filters.strings import add_anchor
 from IPython.nbconvert.utils.pandoc import pandoc
 from IPython.nbconvert.utils.exceptions import ConversionException
 from IPython.utils.decorators import undoc
@@ -45,7 +46,7 @@ class NodeJSMissing(ConversionException):
     """Exception raised when node.js is missing."""
     pass
 
-def markdown2latex(source):
+def markdown2latex(source, markup='markdown', extra_args=None):
     """Convert a markdown string to LaTeX via pandoc.
 
     This function will raise an error if pandoc is not installed.
@@ -55,13 +56,17 @@ def markdown2latex(source):
     ----------
     source : string
       Input string, assumed to be valid markdown.
+    markup : string
+      Markup used by pandoc's reader
+      default : pandoc extended markdown
+      (see http://johnmacfarlane.net/pandoc/README.html#pandocs-markdown)
 
     Returns
     -------
     out : string
       Output as returned by pandoc.
     """
-    return pandoc(source, 'markdown', 'latex')
+    return pandoc(source, markup, 'latex', extra_args=extra_args)
 
 
 @undoc
@@ -72,7 +77,7 @@ class MathBlockGrammar(mistune.BlockGrammar):
 
 @undoc
 class MathBlockLexer(mistune.BlockLexer):
-    default_features = ['block_math', 'latex_environment'] + mistune.BlockLexer.default_features
+    default_rules = ['block_math', 'latex_environment'] + mistune.BlockLexer.default_rules
 
     def __init__(self, rules=None, **kwargs):
         if rules is None:
@@ -96,10 +101,11 @@ class MathBlockLexer(mistune.BlockLexer):
 @undoc
 class MathInlineGrammar(mistune.InlineGrammar):
     math = re.compile("^\$(.+?)\$")
+    text = re.compile(r'^[\s\S]+?(?=[\\<!\[_*`~$]|https?://| {2,}\n|$)')
 
 @undoc
 class MathInlineLexer(mistune.InlineLexer):
-    default_features = ['math'] + mistune.InlineLexer.default_features
+    default_rules = ['math'] + mistune.InlineLexer.default_rules
 
     def __init__(self, renderer, rules=None, **kwargs):
         if rules is None:
@@ -118,10 +124,10 @@ class MarkdownWithMath(mistune.Markdown):
             kwargs['block'] = MathBlockLexer
         super(MarkdownWithMath, self).__init__(renderer, **kwargs)
 
-    def parse_block_math(self):
+    def output_block_math(self):
         return self.renderer.block_math(self.token['text'])
 
-    def parse_latex_environment(self):
+    def output_latex_environment(self):
         return self.renderer.latex_environment(self.token['name'], self.token['text'])
 
 @undoc
@@ -141,6 +147,10 @@ class IPythonRenderer(mistune.Renderer):
         formatter = HtmlFormatter()
         return highlight(code, lexer, formatter)
 
+    def header(self, text, level, raw=None):
+        html = super(IPythonRenderer, self).header(text, level, raw=raw)
+        return add_anchor(html)
+
     # Pass math through unaltered - mathjax does the rendering in the browser
     def block_math(self, text):
         return '$$%s$$' % text
@@ -155,9 +165,10 @@ def markdown2html_mistune(source):
     """Convert a markdown string to HTML using mistune"""
     return MarkdownWithMath(renderer=IPythonRenderer()).render(source)
 
-def markdown2html_pandoc(source):
+def markdown2html_pandoc(source, extra_args=None):
     """Convert a markdown string to HTML via pandoc"""
-    return pandoc(source, 'markdown', 'html', extra_args=['--mathjax'])
+    extra_args = extra_args or ['--mathjax']
+    return pandoc(source, 'markdown', 'html', extra_args=extra_args)
 
 def _find_nodejs():
     global _node
@@ -188,7 +199,7 @@ def markdown2html_marked(source, encoding='utf-8'):
 # The mistune renderer is the default, because it's simple to depend on it
 markdown2html = markdown2html_mistune
 
-def markdown2rst(source):
+def markdown2rst(source, extra_args=None):
     """Convert a markdown string to ReST via pandoc.
 
     This function will raise an error if pandoc is not installed.
@@ -204,7 +215,7 @@ def markdown2rst(source):
     out : string
       Output as returned by pandoc.
     """
-    return pandoc(source, 'markdown', 'rst')
+    return pandoc(source, 'markdown', 'rst', extra_args=extra_args)
 
 def _verify_node(cmd):
     """Verify that the node command exists and is at least the minimum supported

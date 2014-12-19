@@ -5,11 +5,13 @@ import errno
 import io
 import json
 import os
+import shutil
 
 pjoin = os.path.join
 
 import requests
 
+from IPython.kernel.kernelspec import NATIVE_KERNEL_NAME
 from IPython.html.utils import url_path_join
 from IPython.html.tests.launchnotebook import NotebookTestBase, assert_http_error
 
@@ -17,7 +19,6 @@ from IPython.html.tests.launchnotebook import NotebookTestBase, assert_http_erro
 # break these tests
 sample_kernel_json = {'argv':['cat', '{connection_file}'],
                       'display_name':'Test kernel',
-                      'language':'bash',
                      }
 
 some_resource = u"The very model of a modern major general"
@@ -65,21 +66,50 @@ class APITest(NotebookTestBase):
 
         self.ks_api = KernelSpecAPI(self.base_url())
 
+    def test_list_kernelspecs_bad(self):
+        """Can list kernelspecs when one is invalid"""
+        bad_kernel_dir = pjoin(self.ipython_dir.name, 'kernels', 'bad')
+        try:
+            os.makedirs(bad_kernel_dir)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+        
+        with open(pjoin(bad_kernel_dir, 'kernel.json'), 'w') as f:
+            f.write("garbage")
+        
+        model = self.ks_api.list().json()
+        assert isinstance(model, dict)
+        self.assertEqual(model['default'], NATIVE_KERNEL_NAME)
+        specs = model['kernelspecs']
+        assert isinstance(specs, dict)
+        # 2: the sample kernelspec created in setUp, and the native Python kernel
+        self.assertGreaterEqual(len(specs), 2)
+        
+        shutil.rmtree(bad_kernel_dir)
+    
     def test_list_kernelspecs(self):
-        specs = self.ks_api.list().json()
-        assert isinstance(specs, list)
+        model = self.ks_api.list().json()
+        assert isinstance(model, dict)
+        self.assertEqual(model['default'], NATIVE_KERNEL_NAME)
+        specs = model['kernelspecs']
+        assert isinstance(specs, dict)
 
         # 2: the sample kernelspec created in setUp, and the native Python kernel
-        self.assertEqual(len(specs), 2)
+        self.assertGreaterEqual(len(specs), 2)
 
         def is_sample_kernelspec(s):
             return s['name'] == 'sample' and s['display_name'] == 'Test kernel'
 
-        assert any(is_sample_kernelspec(s) for s in specs), specs
+        def is_default_kernelspec(s):
+            return s['name'] == NATIVE_KERNEL_NAME and s['display_name'].startswith("IPython")
+
+        assert any(is_sample_kernelspec(s) for s in specs.values()), specs
+        assert any(is_default_kernelspec(s) for s in specs.values()), specs
 
     def test_get_kernelspec(self):
         spec = self.ks_api.kernel_spec_info('Sample').json()  # Case insensitive
-        self.assertEqual(spec['language'], 'bash')
+        self.assertEqual(spec['display_name'], 'Test kernel')
 
     def test_get_nonexistant_kernelspec(self):
         with assert_http_error(404):

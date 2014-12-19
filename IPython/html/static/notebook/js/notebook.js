@@ -1,70 +1,87 @@
 // Copyright (c) IPython Development Team.
 // Distributed under the terms of the Modified BSD License.
 
+/**
+ * @module notebook
+ */
 define([
     'base/js/namespace',
     'jquery',
     'base/js/utils',
     'base/js/dialog',
+    'notebook/js/cell',
     'notebook/js/textcell',
     'notebook/js/codecell',
-    'services/sessions/js/session',
+    'services/config',
+    'services/sessions/session',
     'notebook/js/celltoolbar',
     'components/marked/lib/marked',
-    'highlight',
+    'codemirror/lib/codemirror',
+    'codemirror/addon/runmode/runmode',
     'notebook/js/mathjaxutils',
     'base/js/keyboard',
     'notebook/js/tooltip',
     'notebook/js/celltoolbarpresets/default',
     'notebook/js/celltoolbarpresets/rawcell',
     'notebook/js/celltoolbarpresets/slideshow',
+    'notebook/js/scrollmanager'
 ], function (
     IPython, 
-    $, 
-    utils, 
-    dialog, 
-    textcell, 
-    codecell, 
+    $,
+    utils,
+    dialog,
+    cellmod,
+    textcell,
+    codecell,
+    configmod,
     session, 
-    celltoolbar, 
+    celltoolbar,
     marked,
-    hljs,
+    CodeMirror,
+    runMode,
     mathjaxutils,
     keyboard,
     tooltip,
     default_celltoolbar,
     rawcell_celltoolbar,
-    slideshow_celltoolbar
+    slideshow_celltoolbar,
+    scrollmanager
     ) {
+    "use strict";
 
+    /**
+     * Contains and manages cells.
+     * 
+     * @class Notebook
+     * @param {string}          selector
+     * @param {object}          options - Dictionary of keyword arguments.  
+     * @param {jQuery}          options.events - selector of Events
+     * @param {KeyboardManager} options.keyboard_manager
+     * @param {Contents}        options.contents
+     * @param {SaveWidget}      options.save_widget
+     * @param {object}          options.config
+     * @param {string}          options.base_url
+     * @param {string}          options.notebook_path
+     * @param {string}          options.notebook_name
+     */
     var Notebook = function (selector, options) {
-        // Constructor
-        //
-        // A notebook contains and manages cells.
-        //
-        // Parameters:
-        //  selector: string
-        //  options: dictionary
-        //      Dictionary of keyword arguments.
-        //          events: $(Events) instance
-        //          keyboard_manager: KeyboardManager instance
-        //          save_widget: SaveWidget instance
-        //          config: dictionary
-        //          base_url : string
-        //          notebook_path : string
-        //          notebook_name : string
-        this.config = options.config || {};
+        this.config = options.config;
+        this.class_config = new configmod.ConfigWithDefaults(this.config, 
+                                        Notebook.options_default, 'Notebook');
         this.base_url = options.base_url;
         this.notebook_path = options.notebook_path;
         this.notebook_name = options.notebook_name;
         this.events = options.events;
         this.keyboard_manager = options.keyboard_manager;
+        this.contents = options.contents;
         this.save_widget = options.save_widget;
         this.tooltip = new tooltip.Tooltip(this.events);
         this.ws_url = options.ws_url;
-        // default_kernel_name is a temporary measure while we implement proper
-        // kernel selection and delayed start. Do not rely on it.
-        this.default_kernel_name = 'python';
+        this._session_starting = false;
+
+        //  Create default scroll manager.
+        this.scroll_manager = new scrollmanager.ScrollManager(this);
+
         // TODO: This code smells (and the other `= this` line a couple lines down)
         // We need a better way to deal with circular instance references.
         this.keyboard_manager.notebook = this;
@@ -76,19 +93,37 @@ define([
             marked.setOptions({
                 gfm : true,
                 tables: true,
-                langPrefix: "language-",
-                highlight: function(code, lang) {
+                // FIXME: probably want central config for CodeMirror theme when we have js config
+                langPrefix: "cm-s-ipython language-",
+                highlight: function(code, lang, callback) {
                     if (!lang) {
                         // no language, no highlight
-                        return code;
+                        if (callback) {
+                            callback(null, code);
+                            return;
+                        } else {
+                            return code;
+                        }
                     }
-                    var highlighted;
-                    try {
-                        highlighted = hljs.highlight(lang, code, false);
-                    } catch(err) {
-                        highlighted = hljs.highlightAuto(code);
-                    }
-                    return highlighted.value;
+                    utils.requireCodeMirrorMode(lang, function (spec) {
+                        var el = document.createElement("div");
+                        var mode = CodeMirror.getMode({}, spec);
+                        if (!mode) {
+                            console.log("No CodeMirror mode: " + lang);
+                            callback(null, code);
+                            return;
+                        }
+                        try {
+                            CodeMirror.runMode(code, spec, el);
+                            callback(null, el.innerHTML);
+                        } catch (err) {
+                            console.log("Failed to highlight " + lang + " code", err);
+                            callback(err, code);
+                        }
+                    }, function (err) {
+                        console.log("No CodeMirror mode: " + lang);
+                        callback(err, code);
+                    });
                 }
             });
         }
@@ -104,6 +139,7 @@ define([
         this.undelete_index = null;
         this.undelete_below = false;
         this.paste_enabled = false;
+        this.writable = false;
         // It is important to start out in command mode to match the intial mode
         // of the KeyboardManager.
         this.mode = 'command';
@@ -116,29 +152,34 @@ define([
         this.autosave_timer = null;
         // autosave *at most* every two minutes
         this.minimum_autosave_interval = 120000;
-        // single worksheet for now
-        this.worksheet_metadata = {};
         this.notebook_name_blacklist_re = /[\/\\:]/;
-        this.nbformat = 3; // Increment this when changing the nbformat
-        this.nbformat_minor = 0; // Increment this when changing the nbformat
+        this.nbformat = 4; // Increment this when changing the nbformat
+        this.nbformat_minor = this.current_nbformat_minor = 0; // Increment this when changing the nbformat
         this.codemirror_mode = 'ipython';
         this.create_elements();
         this.bind_events();
-        this.save_notebook = function() { // don't allow save until notebook_loaded
-            this.save_notebook_error(null, null, "Load failed, save is disabled");
-        };
+        this.kernel_selector = null;
+        this.dirty = null;
+        this.trusted = null;
+        this._fully_loaded = false;
 
         // Trigger cell toolbar registration.
         default_celltoolbar.register(this);
         rawcell_celltoolbar.register(this);
         slideshow_celltoolbar.register(this);
+
+        // prevent assign to miss-typed properties.
+        Object.seal(this);
     };
 
+    Notebook.options_default = {
+        // can be any cell type, or the special values of
+        // 'above', 'below', or 'selected' to get the value from another cell.
+        default_cell_type: 'code'
+    };
 
     /**
      * Create an HTML and CSS representation of the notebook.
-     * 
-     * @method create_elements
      */
     Notebook.prototype.create_elements = function () {
         var that = this;
@@ -159,25 +200,36 @@ define([
 
     /**
      * Bind JavaScript events: key presses and custom IPython events.
-     * 
-     * @method bind_events
      */
     Notebook.prototype.bind_events = function () {
         var that = this;
 
         this.events.on('set_next_input.Notebook', function (event, data) {
-            var index = that.find_cell_index(data.cell);
-            var new_cell = that.insert_cell_below('code',index);
-            new_cell.set_text(data.text);
+            if (data.replace) {
+                data.cell.set_text(data.text);
+                data.cell.clear_output();
+            } else {
+                var index = that.find_cell_index(data.cell);
+                var new_cell = that.insert_cell_below('code',index);
+                new_cell.set_text(data.text);
+            }
             that.dirty = true;
+        });
+
+        this.events.on('unrecognized_cell.Cell', function () {
+            that.warn_nbformat_minor();
+        });
+
+        this.events.on('unrecognized_output.OutputArea', function () {
+            that.warn_nbformat_minor();
         });
 
         this.events.on('set_dirty.Notebook', function (event, data) {
             that.dirty = data.value;
         });
 
-        this.events.on('trust_changed.Notebook', function (event, data) {
-            that.trusted = data.value;
+        this.events.on('trust_changed.Notebook', function (event, trusted) {
+            that.trusted = trusted;
         });
 
         this.events.on('select.Cell', function (event, data) {
@@ -192,26 +244,19 @@ define([
         this.events.on('command_mode.Cell', function (event, data) {
             that.handle_command_mode(data.cell);
         });
-
-        this.events.on('status_autorestarting.Kernel', function () {
-            dialog.modal({
-                notebook: that,
-                keyboard_manager: that.keyboard_manager,
-                title: "Kernel Restarting",
-                body: "The kernel appears to have died. It will restart automatically.",
-                buttons: {
-                    OK : {
-                        class : "btn-primary"
-                    }
-                }
-            });
-        });
         
         this.events.on('spec_changed.Kernel', function(event, data) {
-            that.set_kernelspec_metadata(data);
-            if (data.codemirror_mode) {
-                that.set_codemirror_mode(data.codemirror_mode);
-            }
+            that.metadata.kernelspec = 
+                {name: data.name, display_name: data.display_name};
+        });
+
+        this.events.on('kernel_ready.Kernel', function(event, data) {
+            var kinfo = data.kernel.info_reply;
+            var langinfo = kinfo.language_info || {};
+            that.metadata.language_info = langinfo;
+            // Mode 'null' should be plain, unhighlighted text.
+            var cm_mode = langinfo.codemirror_mode || langinfo.name || 'null';
+            that.set_codemirror_mode(cm_mode);
         });
 
         var collapse_time = function (time) {
@@ -245,7 +290,7 @@ define([
             // TODO: Make killing the kernel configurable.
             var kill_kernel = false;
             if (kill_kernel) {
-                that.session.kill_kernel();
+                that.session.delete();
             }
             // if we are autosaving, trigger an autosave on nav-away.
             // still warn, because if we don't the autosave may fail.
@@ -270,11 +315,33 @@ define([
             return null;
         };
     };
+    
+    /**
+     * Trigger a warning dialog about missing functionality from newer minor versions
+     */
+    Notebook.prototype.warn_nbformat_minor = function (event) {
+        var v = 'v' + this.nbformat + '.';
+        var orig_vs = v + this.nbformat_minor;
+        var this_vs = v + this.current_nbformat_minor;
+        var msg = "This notebook is version " + orig_vs + ", but we only fully support up to " +
+        this_vs + ".  You can still work with this notebook, but cell and output types " +
+        "introduced in later notebook versions will not be available.";
+
+        dialog.modal({
+            notebook: this,
+            keyboard_manager: this.keyboard_manager,
+            title : "Newer Notebook",
+            body : msg,
+            buttons : {
+                OK : {
+                    "class" : "btn-danger"
+                }
+            }
+        });
+    };
 
     /**
      * Set the dirty flag, and trigger the set_dirty.Notebook event
-     * 
-     * @method set_dirty
      */
     Notebook.prototype.set_dirty = function (value) {
         if (value === undefined) {
@@ -289,25 +356,22 @@ define([
     /**
      * Scroll the top of the page to a given cell.
      * 
-     * @method scroll_to_cell
-     * @param {Number} cell_number An index of the cell to view
-     * @param {Number} time Animation time in milliseconds
-     * @return {Number} Pixel offset from the top of the container
+     * @param {integer}  index - An index of the cell to view
+     * @param {integer}  time - Animation time in milliseconds
+     * @return {integer} Pixel offset from the top of the container
      */
-    Notebook.prototype.scroll_to_cell = function (cell_number, time) {
+    Notebook.prototype.scroll_to_cell = function (index, time) {
         var cells = this.get_cells();
         time = time || 0;
-        cell_number = Math.min(cells.length-1,cell_number);
-        cell_number = Math.max(0             ,cell_number);
-        var scroll_value = cells[cell_number].element.position().top-cells[0].element.position().top ;
+        index = Math.min(cells.length-1,index);
+        index = Math.max(0             ,index);
+        var scroll_value = cells[index].element.position().top-cells[0].element.position().top ;
         this.element.animate({scrollTop:scroll_value}, time);
         return scroll_value;
     };
 
     /**
      * Scroll to the bottom of the page.
-     * 
-     * @method scroll_to_bottom
      */
     Notebook.prototype.scroll_to_bottom = function () {
         this.element.animate({scrollTop:this.element.get(0).scrollHeight}, 0);
@@ -315,8 +379,6 @@ define([
 
     /**
      * Scroll to the top of the page.
-     * 
-     * @method scroll_to_top
      */
     Notebook.prototype.scroll_to_top = function () {
         this.element.animate({scrollTop:0}, 0);
@@ -324,45 +386,36 @@ define([
 
     // Edit Notebook metadata
 
+    /**
+     * Display a dialog that allows the user to edit the Notebook's metadata.
+     */
     Notebook.prototype.edit_metadata = function () {
         var that = this;
         dialog.edit_metadata({
             md: this.metadata, 
             callback: function (md) {
                 that.metadata = md;
-            }, 
+            },
             name: 'Notebook',
             notebook: this,
             keyboard_manager: this.keyboard_manager});
     };
-    
-    Notebook.prototype.set_kernelspec_metadata = function(ks) {
-        var tostore = {};
-        $.map(ks, function(value, field) {
-            if (field !== 'argv' && field !== 'env') {
-                tostore[field] = value;
-            }
-        });
-        this.metadata.kernelspec = tostore;
-    }
 
     // Cell indexing, retrieval, etc.
 
     /**
      * Get all cell elements in the notebook.
      * 
-     * @method get_cell_elements
      * @return {jQuery} A selector of all cell elements
      */
     Notebook.prototype.get_cell_elements = function () {
-        return this.container.children("div.cell");
+        return this.container.find(".cell").not('.cell .cell');
     };
 
     /**
      * Get a particular cell element.
      * 
-     * @method get_cell_element
-     * @param {Number} index An index of a cell to select
+     * @param {integer} index An index of a cell to select
      * @return {jQuery} A selector of the given cell.
      */
     Notebook.prototype.get_cell_element = function (index) {
@@ -377,8 +430,7 @@ define([
     /**
      * Try to get a particular cell by msg_id.
      * 
-     * @method get_msg_cell
-     * @param {String} msg_id A message UUID
+     * @param {string} msg_id A message UUID
      * @return {Cell} Cell or null if no cell was found.
      */
     Notebook.prototype.get_msg_cell = function (msg_id) {
@@ -388,8 +440,7 @@ define([
     /**
      * Count the cells in this notebook.
      * 
-     * @method ncells
-     * @return {Number} The number of cells in this notebook
+     * @return {integer} The number of cells in this notebook
      */
     Notebook.prototype.ncells = function () {
         return this.get_cell_elements().length;
@@ -398,23 +449,21 @@ define([
     /**
      * Get all Cell objects in this notebook.
      * 
-     * @method get_cells
      * @return {Array} This notebook's Cell objects
      */
-    // TODO: we are often calling cells as cells()[i], which we should optimize
-    // to cells(i) or a new method.
     Notebook.prototype.get_cells = function () {
+        // TODO: we are often calling cells as cells()[i], which we should optimize
+        // to cells(i) or a new method.
         return this.get_cell_elements().toArray().map(function (e) {
             return $(e).data("cell");
         });
     };
 
     /**
-     * Get a Cell object from this notebook.
+     * Get a Cell objects from this notebook.
      * 
-     * @method get_cell
-     * @param {Number} index An index of a cell to retrieve
-     * @return {Cell} A particular cell
+     * @param {integer} index - An index of a cell to retrieve
+     * @return {Cell} Cell or null if no cell was found.
      */
     Notebook.prototype.get_cell = function (index) {
         var result = null;
@@ -428,9 +477,8 @@ define([
     /**
      * Get the cell below a given cell.
      * 
-     * @method get_next_cell
-     * @param {Cell} cell The provided cell
-     * @return {Cell} The next cell
+     * @param {Cell} cell
+     * @return {Cell} the next cell or null if no cell was found.
      */
     Notebook.prototype.get_next_cell = function (cell) {
         var result = null;
@@ -444,16 +492,13 @@ define([
     /**
      * Get the cell above a given cell.
      * 
-     * @method get_prev_cell
-     * @param {Cell} cell The provided cell
-     * @return {Cell} The previous cell
+     * @param {Cell} cell
+     * @return {Cell} The previous cell or null if no cell was found.
      */
     Notebook.prototype.get_prev_cell = function (cell) {
-        // TODO: off-by-one
-        // nb.get_prev_cell(nb.get_cell(1)) is null
         var result = null;
         var index = this.find_cell_index(cell);
-        if (index !== null && index > 1) {
+        if (index !== null && index > 0) {
             result = this.get_cell(index-1);
         }
         return result;
@@ -462,9 +507,8 @@ define([
     /**
      * Get the numeric index of a given cell.
      * 
-     * @method find_cell_index
-     * @param {Cell} cell The provided cell
-     * @return {Number} The cell's numeric index
+     * @param {Cell} cell
+     * @return {integer} The cell's numeric index or null if no cell was found.
      */
     Notebook.prototype.find_cell_index = function (cell) {
         var result = null;
@@ -477,11 +521,10 @@ define([
     };
 
     /**
-     * Get a given index , or the selected index if none is provided.
+     * Return given index if defined, or the selected index if not.
      * 
-     * @method index_or_selected
-     * @param {Number} index A cell's index
-     * @return {Number} The given index, or selected index if none is provided.
+     * @param {integer} [index] - A cell's index
+     * @return {integer} cell index
      */
     Notebook.prototype.index_or_selected = function (index) {
         var i;
@@ -498,7 +541,7 @@ define([
 
     /**
      * Get the currently selected cell.
-     * @method get_selected_cell
+     * 
      * @return {Cell} The selected cell
      */
     Notebook.prototype.get_selected_cell = function () {
@@ -509,8 +552,7 @@ define([
     /**
      * Check whether a cell index is valid.
      * 
-     * @method is_valid_cell_index
-     * @param {Number} index A cell index
+     * @param {integer} index - A cell index
      * @return True if the index is valid, false otherwise
      */
     Notebook.prototype.is_valid_cell_index = function (index) {
@@ -523,9 +565,8 @@ define([
 
     /**
      * Get the index of the currently selected cell.
-     
-     * @method get_selected_index
-     * @return {Number} The selected cell's numeric index
+     *
+     * @return {integer} The selected cell's numeric index
      */
     Notebook.prototype.get_selected_index = function () {
         var result = null;
@@ -543,8 +584,7 @@ define([
     /**
      * Programmatically select a cell.
      * 
-     * @method select
-     * @param {Number} index A cell's index
+     * @param {integer} index - A cell's index
      * @return {Notebook} This notebook
      */
     Notebook.prototype.select = function (index) {
@@ -576,7 +616,6 @@ define([
     /**
      * Programmatically select the next cell.
      *
-     * @method select_next
      * @return {Notebook} This notebook
      */
     Notebook.prototype.select_next = function () {
@@ -588,7 +627,6 @@ define([
     /**
      * Programmatically select the previous cell.
      *
-     * @method select_prev
      * @return {Notebook} This notebook
      */
     Notebook.prototype.select_prev = function () {
@@ -603,10 +641,8 @@ define([
     /**
      * Gets the index of the cell that is in edit mode.
      *
-     * @method get_edit_index
-     *
-     * @return index {int}
-     **/
+     * @return {integer} index
+     */
     Notebook.prototype.get_edit_index = function () {
         var result = null;
         this.get_cell_elements().filter(function (index) {
@@ -620,9 +656,8 @@ define([
     /**
      * Handle when a a cell blurs and the notebook should enter command mode.
      *
-     * @method handle_command_mode
-     * @param [cell] {Cell} Cell to enter command mode on.
-     **/
+     * @param {Cell} [cell] - Cell to enter command mode on.
+     */
     Notebook.prototype.handle_command_mode = function (cell) {
         if (this.mode !== 'command') {
             cell.command_mode();
@@ -634,9 +669,7 @@ define([
 
     /**
      * Make the notebook enter command mode.
-     *
-     * @method command_mode
-     **/
+     */
     Notebook.prototype.command_mode = function () {
         var cell = this.get_cell(this.get_edit_index());
         if (cell && this.mode !== 'command') {
@@ -650,9 +683,8 @@ define([
     /**
      * Handle when a cell fires it's edit_mode event.
      *
-     * @method handle_edit_mode
-     * @param [cell] {Cell} Cell to enter edit mode on.
-     **/
+     * @param {Cell} [cell] Cell to enter edit mode on.
+     */
     Notebook.prototype.handle_edit_mode = function (cell) {
         if (cell && this.mode !== 'edit') {
             cell.edit_mode();
@@ -664,9 +696,7 @@ define([
 
     /**
      * Make a cell enter edit mode.
-     *
-     * @method edit_mode
-     **/
+     */
     Notebook.prototype.edit_mode = function () {
         var cell = this.get_selected_cell();
         if (cell && this.mode !== 'edit') {
@@ -677,9 +707,7 @@ define([
 
     /**
      * Focus the currently selected cell.
-     *
-     * @method focus_cell
-     **/
+     */
     Notebook.prototype.focus_cell = function () {
         var cell = this.get_selected_cell();
         if (cell === null) {return;}  // No cell is selected
@@ -691,10 +719,9 @@ define([
     /**
      * Move given (or selected) cell up and select it.
      * 
-     * @method move_cell_up
-     * @param [index] {integer} cell index
+     * @param {integer} [index] - cell index
      * @return {Notebook} This notebook
-     **/
+     */
     Notebook.prototype.move_cell_up = function (index) {
         var i = this.index_or_selected(index);
         if (this.is_valid_cell_index(i) && i > 0) {
@@ -714,12 +741,11 @@ define([
 
 
     /**
-     * Move given (or selected) cell down and select it
+     * Move given (or selected) cell down and select it.
      * 
-     * @method move_cell_down
-     * @param [index] {integer} cell index
+     * @param {integer} [index] - cell index
      * @return {Notebook} This notebook
-     **/
+     */
     Notebook.prototype.move_cell_down = function (index) {
         var i = this.index_or_selected(index);
         if (this.is_valid_cell_index(i) && this.is_valid_cell_index(i+1)) {
@@ -743,13 +769,16 @@ define([
     /**
      * Delete a cell from the notebook.
      * 
-     * @method delete_cell
-     * @param [index] A cell's numeric index
+     * @param {integer} [index] - cell's numeric index
      * @return {Notebook} This notebook
      */
     Notebook.prototype.delete_cell = function (index) {
         var i = this.index_or_selected(index);
-        var cell = this.get_selected_cell();
+        var cell = this.get_cell(i);
+        if (!cell.is_deletable()) {
+            return this;
+        }
+
         this.undelete_backup = cell.toJSON();
         $('#undelete_cell').removeClass('disabled');
         if (this.is_valid_cell_index(i)) {
@@ -781,8 +810,6 @@ define([
 
     /**
      * Restore the most recently deleted cell.
-     * 
-     * @method undelete
      */
     Notebook.prototype.undelete_cell = function() {
         if (this.undelete_backup !== null && this.undelete_index !== null) {
@@ -821,23 +848,36 @@ define([
      * If cell type is not provided, it will default to the type of the
      * currently active cell.
      *
-     * Similar to insert_above, but index parameter is mandatory
+     * Similar to insert_above, but index parameter is mandatory.
      *
-     * Index will be brought back into the accessible range [0,n]
+     * Index will be brought back into the accessible range [0,n].
      *
-     * @method insert_cell_at_index
-     * @param [type] {string} in ['code','markdown','heading'], defaults to 'code'
-     * @param [index] {int} a valid index where to insert cell
-     *
-     * @return cell {cell|null} created cell or null
-     **/
+     * @param {string} [type] - in ['code','markdown', 'raw'], defaults to 'code'
+     * @param {integer} [index] - a valid index where to insert cell
+     * @return {Cell|null} created cell or null
+     */
     Notebook.prototype.insert_cell_at_index = function(type, index){
 
         var ncells = this.ncells();
-        index = Math.min(index,ncells);
-        index = Math.max(index,0);
+        index = Math.min(index, ncells);
+        index = Math.max(index, 0);
         var cell = null;
-        type = type || this.get_selected_cell().cell_type;
+        type = type || this.class_config.get_sync('default_cell_type');
+        if (type === 'above') {
+            if (index > 0) {
+                type = this.get_cell(index-1).cell_type;
+            } else {
+                type = 'code';
+            }
+        } else if (type === 'below') {
+            if (index < ncells) {
+                type = this.get_cell(index).cell_type;
+            } else {
+                type = 'code';
+            }
+        } else if (type === 'selected') {
+            type = this.get_selected_cell().cell_type;
+        }
 
         if (ncells === 0 || this.is_valid_cell_index(index) || index === ncells) {
             var cell_options = {
@@ -845,17 +885,22 @@ define([
                 config: this.config, 
                 keyboard_manager: this.keyboard_manager, 
                 notebook: this,
-                tooltip: this.tooltip,
+                tooltip: this.tooltip
             };
-            if (type === 'code') {
+            switch(type) {
+            case 'code':
                 cell = new codecell.CodeCell(this.kernel, cell_options);
                 cell.set_input_prompt();
-            } else if (type === 'markdown') {
+                break;
+            case 'markdown':
                 cell = new textcell.MarkdownCell(cell_options);
-            } else if (type === 'raw') {
+                break;
+            case 'raw':
                 cell = new textcell.RawCell(cell_options);
-            } else if (type === 'heading') {
-                cell = new textcell.HeadingCell(cell_options);
+                break;
+            default:
+                console.log("Unrecognized cell type: ", type, cellmod);
+                cell = new cellmod.UnrecognizedCell(cell_options);
             }
 
             if(this._insert_element_at_index(cell.element,index)) {
@@ -876,13 +921,10 @@ define([
     /**
      * Insert an element at given cell index.
      *
-     * @method _insert_element_at_index
-     * @param element {dom element} a cell element
-     * @param [index] {int} a valid index where to inser cell
-     * @private
-     *
-     * return true if everything whent fine.
-     **/
+     * @param {HTMLElement} element - a cell element
+     * @param {integer}     [index] - a valid index where to inser cell
+     * @returns {boolean}   success
+     */
     Notebook.prototype._insert_element_at_index = function(element, index){
         if (element === undefined){
             return false;
@@ -914,14 +956,10 @@ define([
      * Insert a cell of given type above given index, or at top
      * of notebook if index smaller than 0.
      *
-     * default index value is the one of currently selected cell
-     *
-     * @method insert_cell_above
-     * @param [type] {string} cell type
-     * @param [index] {integer}
-     *
-     * @return handle to created cell or null
-     **/
+     * @param {string}     [type] - cell type
+     * @param {integer}    [index] - defaults to the currently selected cell
+     * @return {Cell|null} handle to created cell or null
+     */
     Notebook.prototype.insert_cell_above = function (type, index) {
         index = this.index_or_selected(index);
         return this.insert_cell_at_index(type, index);
@@ -931,15 +969,10 @@ define([
      * Insert a cell of given type below given index, or at bottom
      * of notebook if index greater than number of cells
      *
-     * default index value is the one of currently selected cell
-     *
-     * @method insert_cell_below
-     * @param [type] {string} cell type
-     * @param [index] {integer}
-     *
-     * @return handle to created cell or null
-     *
-     **/
+     * @param {string}     [type] - cell type
+     * @param {integer}    [index] - defaults to the currently selected cell
+     * @return {Cell|null} handle to created cell or null
+     */
     Notebook.prototype.insert_cell_below = function (type, index) {
         index = this.index_or_selected(index);
         return this.insert_cell_at_index(type, index+1);
@@ -949,11 +982,9 @@ define([
     /**
      * Insert cell at end of notebook
      *
-     * @method insert_cell_at_bottom
-     * @param {String} type cell type
-     *
-     * @return the added cell; or null
-     **/
+     * @param {string} type - cell type
+     * @return {Cell|null} handle to created cell or null
+     */
     Notebook.prototype.insert_cell_at_bottom = function (type){
         var len = this.ncells();
         return this.insert_cell_below(type,len-1);
@@ -962,25 +993,26 @@ define([
     /**
      * Turn a cell into a code cell.
      * 
-     * @method to_code
-     * @param {Number} [index] A cell's index
+     * @param {integer} [index] - cell index
      */
     Notebook.prototype.to_code = function (index) {
         var i = this.index_or_selected(index);
         if (this.is_valid_cell_index(i)) {
-            var source_element = this.get_cell_element(i);
-            var source_cell = source_element.data("cell");
+            var source_cell = this.get_cell(i);
             if (!(source_cell instanceof codecell.CodeCell)) {
                 var target_cell = this.insert_cell_below('code',i);
                 var text = source_cell.get_text();
                 if (text === source_cell.placeholder) {
                     text = '';
                 }
+                //metadata
+                target_cell.metadata = source_cell.metadata;
+
                 target_cell.set_text(text);
                 // make this value the starting point, so that we can only undo
                 // to this state, instead of a blank cell
                 target_cell.code_mirror.clearHistory();
-                source_element.remove();
+                source_cell.element.remove();
                 this.select(i);
                 var cursor = source_cell.code_mirror.getCursor();
                 target_cell.code_mirror.setCursor(cursor);
@@ -992,27 +1024,29 @@ define([
     /**
      * Turn a cell into a Markdown cell.
      * 
-     * @method to_markdown
-     * @param {Number} [index] A cell's index
+     * @param {integer} [index] - cell index
      */
     Notebook.prototype.to_markdown = function (index) {
         var i = this.index_or_selected(index);
         if (this.is_valid_cell_index(i)) {
-            var source_element = this.get_cell_element(i);
-            var source_cell = source_element.data("cell");
+            var source_cell = this.get_cell(i);
+
             if (!(source_cell instanceof textcell.MarkdownCell)) {
                 var target_cell = this.insert_cell_below('markdown',i);
                 var text = source_cell.get_text();
+
                 if (text === source_cell.placeholder) {
                     text = '';
                 }
+                // metadata
+                target_cell.metadata = source_cell.metadata;
                 // We must show the editor before setting its contents
                 target_cell.unrender();
                 target_cell.set_text(text);
                 // make this value the starting point, so that we can only undo
                 // to this state, instead of a blank cell
                 target_cell.code_mirror.clearHistory();
-                source_element.remove();
+                source_cell.element.remove();
                 this.select(i);
                 if ((source_cell instanceof textcell.TextCell) && source_cell.rendered) {
                     target_cell.render();
@@ -1027,28 +1061,29 @@ define([
     /**
      * Turn a cell into a raw text cell.
      * 
-     * @method to_raw
-     * @param {Number} [index] A cell's index
+     * @param {integer} [index] - cell index
      */
     Notebook.prototype.to_raw = function (index) {
         var i = this.index_or_selected(index);
         if (this.is_valid_cell_index(i)) {
-            var source_element = this.get_cell_element(i);
-            var source_cell = source_element.data("cell");
             var target_cell = null;
+            var source_cell = this.get_cell(i);
+
             if (!(source_cell instanceof textcell.RawCell)) {
                 target_cell = this.insert_cell_below('raw',i);
                 var text = source_cell.get_text();
                 if (text === source_cell.placeholder) {
                     text = '';
                 }
+                //metadata
+                target_cell.metadata = source_cell.metadata;
                 // We must show the editor before setting its contents
                 target_cell.unrender();
                 target_cell.set_text(text);
                 // make this value the starting point, so that we can only undo
                 // to this state, instead of a blank cell
                 target_cell.code_mirror.clearHistory();
-                source_element.remove();
+                source_cell.element.remove();
                 this.select(i);
                 var cursor = source_cell.code_mirror.getCursor();
                 target_cell.code_mirror.setCursor(cursor);
@@ -1056,48 +1091,41 @@ define([
             }
         }
     };
-
+    
     /**
-     * Turn a cell into a heading cell.
+     * Warn about heading cell support removal.
+     */
+    Notebook.prototype._warn_heading = function () {
+        dialog.modal({
+            notebook: this,
+            keyboard_manager: this.keyboard_manager,
+            title : "Use markdown headings",
+            body : $("<p/>").text(
+                'IPython no longer uses special heading cells. ' + 
+                'Instead, write your headings in Markdown cells using # characters:'
+            ).append($('<pre/>').text(
+                '## This is a level 2 heading'
+            )),
+            buttons : {
+                "OK" : {}
+            }
+        });
+    };
+    
+    /**
+     * Turn a cell into a heading containing markdown cell.
      * 
-     * @method to_heading
-     * @param {Number} [index] A cell's index
-     * @param {Number} [level] A heading level (e.g., 1 becomes &lt;h1&gt;)
+     * @param {integer} [index] - cell index
+     * @param {integer} [level] - heading level (e.g., 1 for h1)
      */
     Notebook.prototype.to_heading = function (index, level) {
+        this.to_markdown(index);
         level = level || 1;
         var i = this.index_or_selected(index);
         if (this.is_valid_cell_index(i)) {
-            var source_element = this.get_cell_element(i);
-            var source_cell = source_element.data("cell");
-            var target_cell = null;
-            if (source_cell instanceof textcell.HeadingCell) {
-                source_cell.set_level(level);
-            } else {
-                target_cell = this.insert_cell_below('heading',i);
-                var text = source_cell.get_text();
-                if (text === source_cell.placeholder) {
-                    text = '';
-                }
-                // We must show the editor before setting its contents
-                target_cell.set_level(level);
-                target_cell.unrender();
-                target_cell.set_text(text);
-                // make this value the starting point, so that we can only undo
-                // to this state, instead of a blank cell
-                target_cell.code_mirror.clearHistory();
-                source_element.remove();
-                this.select(i);
-                var cursor = source_cell.code_mirror.getCursor();
-                target_cell.code_mirror.setCursor(cursor);
-                if ((source_cell instanceof textcell.TextCell) && source_cell.rendered) {
-                    target_cell.render();
-                }
-            }
+            var cell = this.get_cell(i);
+            cell.set_heading_level(level);
             this.set_dirty(true);
-            this.events.trigger('selected_cell_type_changed.Notebook',
-                {'cell_type':'heading',level:level}
-            );
         }
     };
 
@@ -1105,9 +1133,7 @@ define([
     // Cut/Copy/Paste
 
     /**
-     * Enable UI elements for pasting cells.
-     * 
-     * @method enable_paste
+     * Enable the UI elements for pasting cells.
      */
     Notebook.prototype.enable_paste = function () {
         var that = this;
@@ -1123,9 +1149,7 @@ define([
     };
 
     /**
-     * Disable UI elements for pasting cells.
-     * 
-     * @method disable_paste
+     * Disable the UI elements for pasting cells.
      */
     Notebook.prototype.disable_paste = function () {
         if (this.paste_enabled) {
@@ -1138,8 +1162,6 @@ define([
 
     /**
      * Cut a cell.
-     * 
-     * @method cut_cell
      */
     Notebook.prototype.cut_cell = function () {
         this.copy_cell();
@@ -1148,19 +1170,19 @@ define([
 
     /**
      * Copy a cell.
-     * 
-     * @method copy_cell
      */
     Notebook.prototype.copy_cell = function () {
         var cell = this.get_selected_cell();
         this.clipboard = cell.toJSON();
+        // remove undeletable status from the copied cell
+        if (this.clipboard.metadata.deletable !== undefined) {
+            delete this.clipboard.metadata.deletable;
+        }
         this.enable_paste();
     };
 
     /**
-     * Replace the selected cell with a cell in the clipboard.
-     * 
-     * @method paste_cell_replace
+     * Replace the selected cell with the cell in the clipboard.
      */
     Notebook.prototype.paste_cell_replace = function () {
         if (this.clipboard !== null && this.paste_enabled) {
@@ -1175,8 +1197,6 @@ define([
 
     /**
      * Paste a cell from the clipboard above the selected cell.
-     * 
-     * @method paste_cell_above
      */
     Notebook.prototype.paste_cell_above = function () {
         if (this.clipboard !== null && this.paste_enabled) {
@@ -1189,8 +1209,6 @@ define([
 
     /**
      * Paste a cell from the clipboard below the selected cell.
-     * 
-     * @method paste_cell_below
      */
     Notebook.prototype.paste_cell_below = function () {
         if (this.clipboard !== null && this.paste_enabled) {
@@ -1204,13 +1222,9 @@ define([
     // Split/merge
 
     /**
-     * Split the selected cell into two, at the cursor.
-     * 
-     * @method split_cell
+     * Split the selected cell into two cells.
      */
     Notebook.prototype.split_cell = function () {
-        var mdc = textcell.MarkdownCell;
-        var rc = textcell.RawCell;
         var cell = this.get_selected_cell();
         if (cell.is_splittable()) {
             var texta = cell.get_pre_cursor();
@@ -1224,13 +1238,9 @@ define([
     };
 
     /**
-     * Combine the selected cell into the cell above it.
-     * 
-     * @method merge_cell_above
+     * Merge the selected cell into the cell above it.
      */
     Notebook.prototype.merge_cell_above = function () {
-        var mdc = textcell.MarkdownCell;
-        var rc = textcell.RawCell;
         var index = this.get_selected_index();
         var cell = this.get_cell(index);
         var render = cell.rendered;
@@ -1261,13 +1271,9 @@ define([
     };
 
     /**
-     * Combine the selected cell into the cell below it.
-     * 
-     * @method merge_cell_below
+     * Merge the selected cell into the cell below it.
      */
     Notebook.prototype.merge_cell_below = function () {
-        var mdc = textcell.MarkdownCell;
-        var rc = textcell.RawCell;
         var index = this.get_selected_index();
         var cell = this.get_cell(index);
         var render = cell.rendered;
@@ -1303,8 +1309,7 @@ define([
     /**
      * Hide a cell's output.
      * 
-     * @method collapse_output
-     * @param {Number} index A cell's numeric index
+     * @param {integer} index - cell index
      */
     Notebook.prototype.collapse_output = function (index) {
         var i = this.index_or_selected(index);
@@ -1317,11 +1322,9 @@ define([
 
     /**
      * Hide each code cell's output area.
-     * 
-     * @method collapse_all_output
      */
     Notebook.prototype.collapse_all_output = function () {
-        $.map(this.get_cells(), function (cell, i) {
+        this.get_cells().map(function (cell, i) {
             if (cell instanceof codecell.CodeCell) {
                 cell.collapse_output();
             }
@@ -1333,8 +1336,7 @@ define([
     /**
      * Show a cell's output.
      * 
-     * @method expand_output
-     * @param {Number} index A cell's numeric index
+     * @param {integer} index - cell index
      */
     Notebook.prototype.expand_output = function (index) {
         var i = this.index_or_selected(index);
@@ -1347,11 +1349,9 @@ define([
 
     /**
      * Expand each code cell's output area, and remove scrollbars.
-     * 
-     * @method expand_all_output
      */
     Notebook.prototype.expand_all_output = function () {
-        $.map(this.get_cells(), function (cell, i) {
+        this.get_cells().map(function (cell, i) {
             if (cell instanceof codecell.CodeCell) {
                 cell.expand_output();
             }
@@ -1363,8 +1363,7 @@ define([
     /**
      * Clear the selected CodeCell's output area.
      * 
-     * @method clear_output
-     * @param {Number} index A cell's numeric index
+     * @param {integer} index - cell index
      */
     Notebook.prototype.clear_output = function (index) {
         var i = this.index_or_selected(index);
@@ -1377,11 +1376,9 @@ define([
 
     /**
      * Clear each code cell's output area.
-     * 
-     * @method clear_all_output
      */
     Notebook.prototype.clear_all_output = function () {
-        $.map(this.get_cells(), function (cell, i) {
+        this.get_cells().map(function (cell, i) {
             if (cell instanceof codecell.CodeCell) {
                 cell.clear_output();
             }
@@ -1392,8 +1389,7 @@ define([
     /**
      * Scroll the selected CodeCell's output area.
      * 
-     * @method scroll_output
-     * @param {Number} index A cell's numeric index
+     * @param {integer} index - cell index
      */
     Notebook.prototype.scroll_output = function (index) {
         var i = this.index_or_selected(index);
@@ -1405,12 +1401,10 @@ define([
     };
 
     /**
-     * Expand each code cell's output area, and add a scrollbar for long output.
-     * 
-     * @method scroll_all_output
+     * Expand each code cell's output area and add a scrollbar for long output.
      */
     Notebook.prototype.scroll_all_output = function () {
-        $.map(this.get_cells(), function (cell, i) {
+        this.get_cells().map(function (cell, i) {
             if (cell instanceof codecell.CodeCell) {
                 cell.scroll_output();
             }
@@ -1419,10 +1413,10 @@ define([
         this.set_dirty(true);
     };
 
-    /** Toggle whether a cell's output is collapsed or expanded.
+    /** 
+     * Toggle whether a cell's output is collapsed or expanded.
      * 
-     * @method toggle_output
-     * @param {Number} index A cell's numeric index
+     * @param {integer} index - cell index
      */
     Notebook.prototype.toggle_output = function (index) {
         var i = this.index_or_selected(index);
@@ -1434,12 +1428,10 @@ define([
     };
 
     /**
-     * Hide/show the output of all cells.
-     * 
-     * @method toggle_all_output
+     * Toggle the output of all cells.
      */
     Notebook.prototype.toggle_all_output = function () {
-        $.map(this.get_cells(), function (cell, i) {
+        this.get_cells().map(function (cell, i) {
             if (cell instanceof codecell.CodeCell) {
                 cell.toggle_output();
             }
@@ -1451,8 +1443,7 @@ define([
     /**
      * Toggle a scrollbar for long cell outputs.
      * 
-     * @method toggle_output_scroll
-     * @param {Number} index A cell's numeric index
+     * @param {integer} index - cell index
      */
     Notebook.prototype.toggle_output_scroll = function (index) {
         var i = this.index_or_selected(index);
@@ -1465,11 +1456,9 @@ define([
 
     /**
      * Toggle the scrolling of long output on all cells.
-     * 
-     * @method toggle_all_output_scrolling
      */
     Notebook.prototype.toggle_all_output_scroll = function () {
-        $.map(this.get_cells(), function (cell, i) {
+        this.get_cells().map(function (cell, i) {
             if (cell instanceof codecell.CodeCell) {
                 cell.toggle_output_scroll();
             }
@@ -1482,8 +1471,6 @@ define([
 
     /**
      * Toggle line numbers in the selected cell's input area.
-     * 
-     * @method cell_toggle_line_numbers
      */
     Notebook.prototype.cell_toggle_line_numbers = function() {
         this.get_selected_cell().toggle_line_numbers();
@@ -1492,8 +1479,6 @@ define([
     /**
      * Set the codemirror mode for all code cells, including the default for
      * new code cells.
-     * 
-     * @method set_codemirror_mode
      */
     Notebook.prototype.set_codemirror_mode = function(newmode){
         if (newmode === this.codemirror_mode) {
@@ -1501,54 +1486,59 @@ define([
         }
         this.codemirror_mode = newmode;
         codecell.CodeCell.options_default.cm_config.mode = newmode;
-        modename = newmode.name || newmode
-
-        that = this;
-        CodeMirror.requireMode(modename, function(){
-            $.map(that.get_cells(), function(cell, i) {
+        
+        var that = this;
+        utils.requireCodeMirrorMode(newmode, function (spec) {
+            that.get_cells().map(function(cell, i) {
                 if (cell.cell_type === 'code'){
-                    cell.code_mirror.setOption('mode', newmode);
+                    cell.code_mirror.setOption('mode', spec);
                     // This is currently redundant, because cm_config ends up as
                     // codemirror's own .options object, but I don't want to
                     // rely on that.
-                    cell.cm_config.mode = newmode;
+                    cell.cm_config.mode = spec;
                 }
             });
-        })
+        });
     };
 
     // Session related things
 
     /**
      * Start a new session and set it on each code cell.
-     * 
-     * @method start_session
      */
     Notebook.prototype.start_session = function (kernel_name) {
-        if (kernel_name === undefined) {
-            kernel_name = this.default_kernel_name;
+        if (this._session_starting) {
+            throw new session.SessionAlreadyStarting();
         }
-        this.session = new session.Session({
+        this._session_starting = true;
+
+        var options = {
             base_url: this.base_url,
             ws_url: this.ws_url,
             notebook_path: this.notebook_path,
             notebook_name: this.notebook_name,
-            // For now, create all sessions with the 'python' kernel, which is the
-            // default. Later, the user will be able to select kernels. This is
-            // overridden if KernelManager.kernel_cmd is specified for the server.
             kernel_name: kernel_name,
-            notebook: this});
+            notebook: this
+        };
 
-        this.session.start($.proxy(this._session_started, this));
+        var success = $.proxy(this._session_started, this);
+        var failure = $.proxy(this._session_start_failed, this);
+
+        if (this.session !== null) {
+            this.session.restart(options, success, failure);
+        } else {
+            this.session = new session.Session(options);
+            this.session.start(success, failure);
+        }
     };
 
 
     /**
      * Once a session is started, link the code cells to the kernel and pass the 
-     * comm manager to the widget manager
-     *
+     * comm manager to the widget manager.
      */
-    Notebook.prototype._session_started = function(){
+    Notebook.prototype._session_started = function (){
+        this._session_starting = false;
         this.kernel = this.session.kernel;
         var ncells = this.ncells();
         for (var i=0; i<ncells; i++) {
@@ -1558,11 +1548,17 @@ define([
             }
         }
     };
+
+    /**
+     * Called when the session fails to start.
+     */
+    Notebook.prototype._session_start_failed = function(jqxhr, status, error){
+        this._session_starting = false;
+        utils.log_ajax_error(jqxhr, status, error);
+    };
     
     /**
      * Prompt the user to restart the IPython kernel.
-     * 
-     * @method restart_kernel
      */
     Notebook.prototype.restart_kernel = function () {
         var that = this;
@@ -1578,7 +1574,7 @@ define([
                 "Restart" : {
                     "class" : "btn-danger",
                     "click" : function() {
-                        that.session.restart_kernel();
+                        that.kernel.restart();
                     }
                 }
             }
@@ -1587,13 +1583,10 @@ define([
     
     /**
      * Execute or render cell outputs and go into command mode.
-     * 
-     * @method execute_cell
      */
     Notebook.prototype.execute_cell = function () {
         // mode = shift, ctrl, alt
         var cell = this.get_selected_cell();
-        var cell_index = this.find_cell_index(cell);
         
         cell.execute();
         this.command_mode();
@@ -1602,8 +1595,6 @@ define([
 
     /**
      * Execute or render cell outputs and insert a new cell below.
-     * 
-     * @method execute_cell_and_insert_below
      */
     Notebook.prototype.execute_cell_and_insert_below = function () {
         var cell = this.get_selected_cell();
@@ -1631,8 +1622,6 @@ define([
 
     /**
      * Execute or render cell outputs and select the next cell.
-     * 
-     * @method execute_cell_and_select_below
      */
     Notebook.prototype.execute_cell_and_select_below = function () {
 
@@ -1660,8 +1649,6 @@ define([
 
     /**
      * Execute all cells below the selected cell.
-     * 
-     * @method execute_cells_below
      */
     Notebook.prototype.execute_cells_below = function () {
         this.execute_cell_range(this.get_selected_index(), this.ncells());
@@ -1670,8 +1657,6 @@ define([
 
     /**
      * Execute all cells above the selected cell.
-     * 
-     * @method execute_cells_above
      */
     Notebook.prototype.execute_cells_above = function () {
         this.execute_cell_range(0, this.get_selected_index());
@@ -1679,8 +1664,6 @@ define([
 
     /**
      * Execute all cells.
-     * 
-     * @method execute_all_cells
      */
     Notebook.prototype.execute_all_cells = function () {
         this.execute_cell_range(0, this.ncells());
@@ -1690,9 +1673,8 @@ define([
     /**
      * Execute a contiguous range of cells.
      * 
-     * @method execute_cell_range
-     * @param {Number} start Index of the first cell to execute (inclusive)
-     * @param {Number} end Index of the last cell to execute (exclusive)
+     * @param {integer} start - index of the first cell to execute (inclusive)
+     * @param {integer} end - index of the last cell to execute (exclusive)
      */
     Notebook.prototype.execute_cell_range = function (start, end) {
         this.command_mode();
@@ -1707,8 +1689,7 @@ define([
     /**
      * Getter method for this notebook's name.
      * 
-     * @method get_notebook_name
-     * @return {String} This notebook's name (excluding file extension)
+     * @return {string} This notebook's name (excluding file extension)
      */
     Notebook.prototype.get_notebook_name = function () {
         var nbname = this.notebook_name.substring(0,this.notebook_name.length-6);
@@ -1718,19 +1699,19 @@ define([
     /**
      * Setter method for this notebook's name.
      *
-     * @method set_notebook_name
-     * @param {String} name A new name for this notebook
+     * @param {string} name
      */
     Notebook.prototype.set_notebook_name = function (name) {
+        var parent = utils.url_path_split(this.notebook_path)[0];
         this.notebook_name = name;
+        this.notebook_path = utils.url_path_join(parent, name);
     };
 
     /**
      * Check that a notebook's name is valid.
      * 
-     * @method test_notebook_name
-     * @param {String} nbname A name for this notebook
-     * @return {Boolean} True if the name is valid, false if invalid
+     * @param {string} nbname - A name for this notebook
+     * @return {boolean} True if the name is valid, false if invalid
      */
     Notebook.prototype.test_notebook_name = function (nbname) {
         nbname = nbname || '';
@@ -1744,12 +1725,10 @@ define([
     /**
      * Load a notebook from JSON (.ipynb).
      * 
-     * This currently handles one worksheet: others are deleted.
-     * 
-     * @method fromJSON
-     * @param {Object} data JSON representation of a notebook
+     * @param {object} data - JSON representation of a notebook
      */
     Notebook.prototype.fromJSON = function (data) {
+
         var content = data.content;
         var ncells = this.ncells();
         var i;
@@ -1760,67 +1739,58 @@ define([
         // Save the metadata and name.
         this.metadata = content.metadata;
         this.notebook_name = data.name;
+        this.notebook_path = data.path;
         var trusted = true;
         
         // Trigger an event changing the kernel spec - this will set the default
         // codemirror mode
         if (this.metadata.kernelspec !== undefined) {
-            this.events.trigger('spec_changed.Kernel', this.metadata.kernelspec);
+            // TODO shoudl probably not trigger here, 
+            // should call the kernel selector, or custom.{js|css} not loaded.
+            if(this.kernel_selector){
+                // technically not perfect, we should check that the kernelspec matches
+                this.kernel_selector.change_kernel(this.metadata.kernelspec.name);
+            } else {
+                console.log('do not have handle on kernel_selector');
+            }
         }
         
-        // Only handle 1 worksheet for now.
-        var worksheet = content.worksheets[0];
-        if (worksheet !== undefined) {
-            if (worksheet.metadata) {
-                this.worksheet_metadata = worksheet.metadata;
-            }
-            var new_cells = worksheet.cells;
-            ncells = new_cells.length;
-            var cell_data = null;
-            var new_cell = null;
-            for (i=0; i<ncells; i++) {
-                cell_data = new_cells[i];
-                // VERSIONHACK: plaintext -> raw
-                // handle never-released plaintext name for raw cells
-                if (cell_data.cell_type === 'plaintext'){
-                    cell_data.cell_type = 'raw';
-                }
-
-                new_cell = this.insert_cell_at_index(cell_data.cell_type, i);
-                new_cell.fromJSON(cell_data);
-                if (new_cell.cell_type == 'code' && !new_cell.output_area.trusted) {
-                    trusted = false;
-                }
+        // Set the codemirror mode from language_info metadata
+        if (this.metadata.language_info !== undefined) {
+            var langinfo = this.metadata.language_info;
+            // Mode 'null' should be plain, unhighlighted text.
+            var cm_mode = langinfo.codemirror_mode || langinfo.name || 'null';
+            this.set_codemirror_mode(cm_mode);
+        }
+        
+        var new_cells = content.cells;
+        ncells = new_cells.length;
+        var cell_data = null;
+        var new_cell = null;
+        for (i=0; i<ncells; i++) {
+            cell_data = new_cells[i];
+            new_cell = this.insert_cell_at_index(cell_data.cell_type, i);
+            new_cell.fromJSON(cell_data);
+            if (new_cell.cell_type == 'code' && !new_cell.output_area.trusted) {
+                trusted = false;
             }
         }
-        if (trusted != this.trusted) {
+        if (trusted !== this.trusted) {
             this.trusted = trusted;
             this.events.trigger("trust_changed.Notebook", trusted);
-        }
-        if (content.worksheets.length > 1) {
-            dialog.modal({
-                notebook: this,
-                keyboard_manager: this.keyboard_manager,
-                title : "Multiple worksheets",
-                body : "This notebook has " + data.worksheets.length + " worksheets, " +
-                    "but this version of IPython can only handle the first.  " +
-                    "If you save this notebook, worksheets after the first will be lost.",
-                buttons : {
-                    OK : {
-                        class : "btn-danger"
-                    }
-                }
-            });
         }
     };
 
     /**
      * Dump this notebook into a JSON-friendly object.
      * 
-     * @method toJSON
-     * @return {Object} A JSON-friendly representation of this notebook.
+     * @return {object} A JSON-friendly representation of this notebook.
      */
     Notebook.prototype.toJSON = function () {
+        // remove the conversion indicator, which only belongs in-memory
+        delete this.metadata.orig_nbformat;
+        delete this.metadata.orig_nbformat_minor;
+
         var cells = this.get_cells();
         var ncells = cells.length;
         var cell_array = new Array(ncells);
@@ -1833,12 +1803,10 @@ define([
             cell_array[i] = cell.toJSON();
         }
         var data = {
-            // Only handle 1 worksheet for now.
-            worksheets : [{
-                cells: cell_array,
-                metadata: this.worksheet_metadata
-            }],
-            metadata : this.metadata
+            cells: cell_array,
+            metadata: this.metadata,
+            nbformat: this.nbformat,
+            nbformat_minor: this.nbformat_minor
         };
         if (trusted != this.trusted) {
             this.trusted = trusted;
@@ -1848,16 +1816,19 @@ define([
     };
 
     /**
-     * Start an autosave timer, for periodically saving the notebook.
+     * Start an autosave timer which periodically saves the notebook.
      * 
-     * @method set_autosave_interval
-     * @param {Integer} interval the autosave interval in milliseconds
+     * @param {integer} interval - the autosave interval in milliseconds
      */
     Notebook.prototype.set_autosave_interval = function (interval) {
         var that = this;
         // clear previous interval, so we don't get simultaneous timers
         if (this.autosave_timer) {
             clearInterval(this.autosave_timer);
+        }
+        if (!this.writable) {
+            // disable autosave if not writable
+            interval = 0;
         }
         
         this.autosave_interval = this.minimum_autosave_interval = interval;
@@ -1877,57 +1848,73 @@ define([
     /**
      * Save this notebook on the server. This becomes a notebook instance's
      * .save_notebook method *after* the entire notebook has been loaded.
-     * 
-     * @method save_notebook
      */
-    Notebook.prototype.save_notebook = function (extra_settings) {
+    Notebook.prototype.save_notebook = function () {
+        if (!this._fully_loaded) {
+            this.events.trigger('notebook_save_failed.Notebook',
+                new Error("Load failed, save is disabled")
+            );
+            return;
+        } else if (!this.writable) {
+            this.events.trigger('notebook_save_failed.Notebook',
+                new Error("Notebook is read-only")
+            );
+            return;
+        }
+
+        // Trigger an event before save, which allows listeners to modify
+        // the notebook as needed.
+        this.events.trigger('before_save.Notebook');
+
         // Create a JSON model to be sent to the server.
-        var model = {};
-        model.name = this.notebook_name;
-        model.path = this.notebook_path;
-        model.type = 'notebook';
-        model.format = 'json';
-        model.content = this.toJSON();
-        model.content.nbformat = this.nbformat;
-        model.content.nbformat_minor = this.nbformat_minor;
+        var model = {
+            type : "notebook",
+            content : this.toJSON()
+        };
         // time the ajax call for autosave tuning purposes.
         var start =  new Date().getTime();
-        // We do the call with settings so we can set cache to false.
-        var settings = {
-            processData : false,
-            cache : false,
-            type : "PUT",
-            data : JSON.stringify(model),
-            headers : {'Content-Type': 'application/json'},
-            success : $.proxy(this.save_notebook_success, this, start),
-            error : $.proxy(this.save_notebook_error, this)
-        };
-        if (extra_settings) {
-            for (var key in extra_settings) {
-                settings[key] = extra_settings[key];
-            }
-        }
-        this.events.trigger('notebook_saving.Notebook');
-        var url = utils.url_join_encode(
-            this.base_url,
-            'api/contents',
-            this.notebook_path,
-            this.notebook_name
-        );
-        $.ajax(url, settings);
+
+        var that = this;
+        return this.contents.save(this.notebook_path, model).then(
+                $.proxy(this.save_notebook_success, this, start),
+                function (error) {
+                    that.events.trigger('notebook_save_failed.Notebook', error);
+                }
+            );
     };
     
     /**
      * Success callback for saving a notebook.
      * 
-     * @method save_notebook_success
-     * @param {Integer} start the time when the save request started
-     * @param {Object} data JSON representation of a notebook
-     * @param {String} status Description of response status
-     * @param {jqXHR} xhr jQuery Ajax object
+     * @param {integer} start - Time when the save request start
+     * @param {object}  data - JSON representation of a notebook
      */
-    Notebook.prototype.save_notebook_success = function (start, data, status, xhr) {
+    Notebook.prototype.save_notebook_success = function (start, data) {
         this.set_dirty(false);
+        if (data.message) {
+            // save succeeded, but validation failed.
+            var body = $("<div>");
+            var title = "Notebook validation failed";
+
+            body.append($("<p>").text(
+                "The save operation succeeded," +
+                " but the notebook does not appear to be valid." +
+                " The validation error was:"
+            )).append($("<div>").addClass("validation-error").append(
+                $("<pre>").text(data.message)
+            ));
+            dialog.modal({
+                notebook: this,
+                keyboard_manager: this.keyboard_manager,
+                title: title,
+                body: body,
+                buttons : {
+                    OK : {
+                        "class" : "btn-primary"
+                    }
+                }
+            });
+        }
         this.events.trigger('notebook_saved.Notebook');
         this._update_autosave_interval(start);
         if (this._checkpoint_after_save) {
@@ -1937,10 +1924,9 @@ define([
     };
     
     /**
-     * update the autosave interval based on how long the last save took
+     * Update the autosave interval based on the duration of the last save.
      * 
-     * @method _update_autosave_interval
-     * @param {Integer} timestamp when the save request started
+     * @param {integer} timestamp - when the save request started
      */
     Notebook.prototype._update_autosave_interval = function (start) {
         var duration = (new Date().getTime() - start);
@@ -1955,25 +1941,11 @@ define([
             }
         }
     };
-    
-    /**
-     * Failure callback for saving a notebook.
-     * 
-     * @method save_notebook_error
-     * @param {jqXHR} xhr jQuery Ajax object
-     * @param {String} status Description of response status
-     * @param {String} error HTTP error message
-     */
-    Notebook.prototype.save_notebook_error = function (xhr, status, error) {
-        this.events.trigger('notebook_save_failed.Notebook', [xhr, status, error]);
-    };
 
     /**
      * Explicitly trust the output of this notebook.
-     *
-     * @method trust_notebook
      */
-    Notebook.prototype.trust_notebook = function (extra_settings) {
+    Notebook.prototype.trust_notebook = function () {
         var body = $("<div>").append($("<p>")
             .text("A trusted IPython notebook may execute hidden malicious code ")
             .append($("<strong>")
@@ -2008,7 +1980,7 @@ define([
                                 cell.output_area.trusted = true;
                             }
                         }
-                        this.events.on('notebook_saved.Notebook', function () {
+                        nb.events.on('notebook_saved.Notebook', function () {
                             window.location.reload();
                         });
                         nb.save_notebook();
@@ -2018,177 +1990,70 @@ define([
         });
     };
 
-    Notebook.prototype.new_notebook = function(){
-        var path = this.notebook_path;
+    /**
+     * Make a copy of the current notebook.
+     */
+    Notebook.prototype.copy_notebook = function () {
+        var that = this;
         var base_url = this.base_url;
-        var settings = {
-            processData : false,
-            cache : false,
-            type : "POST",
-            dataType : "json",
-            async : false,
-            success : function (data, status, xhr){
-                var notebook_name = data.name;
-                window.open(
-                    utils.url_join_encode(
-                        base_url,
-                        'notebooks',
-                        path,
-                        notebook_name
-                    ),
-                    '_blank'
+        var w = window.open();
+        var parent = utils.url_path_split(this.notebook_path)[0];
+        this.contents.copy(this.notebook_path, parent).then(
+            function (data) {
+                w.location = utils.url_join_encode(
+                    base_url, 'notebooks', data.path
                 );
             },
-            error : utils.log_ajax_error,
-        };
-        var url = utils.url_join_encode(
-            base_url,
-            'api/contents',
-            path
-        );
-        $.ajax(url,settings);
-    };
-
-
-    Notebook.prototype.copy_notebook = function(){
-        var path = this.notebook_path;
-        var base_url = this.base_url;
-        var settings = {
-            processData : false,
-            cache : false,
-            type : "POST",
-            dataType : "json",
-            data : JSON.stringify({copy_from : this.notebook_name}),
-            async : false,
-            success : function (data, status, xhr) {
-                window.open(utils.url_join_encode(
-                    base_url,
-                    'notebooks',
-                    data.path,
-                    data.name
-                ), '_blank');
-            },
-            error : utils.log_ajax_error,
-        };
-        var url = utils.url_join_encode(
-            base_url,
-            'api/contents',
-            path
-        );
-        $.ajax(url,settings);
-    };
-
-    Notebook.prototype.rename = function (nbname) {
-        var that = this;
-        if (!nbname.match(/\.ipynb$/)) {
-            nbname = nbname + ".ipynb";
-        }
-        var data = {name: nbname};
-        var settings = {
-            processData : false,
-            cache : false,
-            type : "PATCH",
-            data : JSON.stringify(data),
-            dataType: "json",
-            headers : {'Content-Type': 'application/json'},
-            success : $.proxy(that.rename_success, this),
-            error : $.proxy(that.rename_error, this)
-        };
-        this.events.trigger('rename_notebook.Notebook', data);
-        var url = utils.url_join_encode(
-            this.base_url,
-            'api/contents',
-            this.notebook_path,
-            this.notebook_name
-        );
-        $.ajax(url, settings);
-    };
-
-    Notebook.prototype.delete = function () {
-        var that = this;
-        var settings = {
-            processData : false,
-            cache : false,
-            type : "DELETE",
-            dataType: "json",
-            error : utils.log_ajax_error,
-        };
-        var url = utils.url_join_encode(
-            this.base_url,
-            'api/contents',
-            this.notebook_path,
-            this.notebook_name
-        );
-        $.ajax(url, settings);
-    };
-
-    
-    Notebook.prototype.rename_success = function (json, status, xhr) {
-        var name = this.notebook_name = json.name;
-        var path = json.path;
-        this.session.rename_notebook(name, path);
-        this.events.trigger('notebook_renamed.Notebook', json);
-    };
-
-    Notebook.prototype.rename_error = function (xhr, status, error) {
-        var that = this;
-        var dialog_body = $('<div/>').append(
-            $("<p/>").text('This notebook name already exists.')
-        );
-        this.events.trigger('notebook_rename_failed.Notebook', [xhr, status, error]);
-        dialog.modal({
-            notebook: this,
-            keyboard_manager: this.keyboard_manager,
-            title: "Notebook Rename Error!",
-            body: dialog_body,
-            buttons : {
-                "Cancel": {},
-                "OK": {
-                    class: "btn-primary",
-                    click: function () {
-                        this.save_widget.rename_notebook({notebook:that});
-                }}
-                },
-            open : function (event, ui) {
-                var that = $(this);
-                // Upon ENTER, click the OK button.
-                that.find('input[type="text"]').keydown(function (event, ui) {
-                    if (event.which === this.keyboard.keycodes.enter) {
-                        that.find('.btn-primary').first().click();
-                    }
-                });
-                that.find('input[type="text"]').focus();
+            function(error) {
+                w.close();
+                that.events.trigger('notebook_copy_failed', error);
             }
-        });
+        );
+    };
+
+    /**
+     * Rename the notebook.
+     * @param  {string} new_name
+     * @return {Promise} promise that resolves when the notebook is renamed.
+     */
+    Notebook.prototype.rename = function (new_name) {
+        if (!new_name.match(/\.ipynb$/)) {
+            new_name = new_name + ".ipynb";
+        }
+
+        var that = this;
+        var parent = utils.url_path_split(this.notebook_path)[0];
+        var new_path = utils.url_path_join(parent, new_name);
+        return this.contents.rename(this.notebook_path, new_path).then(
+            function (json) {
+                that.notebook_name = json.name;
+                that.notebook_path = json.path;
+                that.session.rename_notebook(json.path);
+                that.events.trigger('notebook_renamed.Notebook', json);
+            }
+        );
+    };
+
+    /**
+     * Delete this notebook
+     */
+    Notebook.prototype.delete = function () {
+        this.contents.delete(this.notebook_path);
     };
 
     /**
      * Request a notebook's data from the server.
      * 
-     * @method load_notebook
-     * @param {String} notebook_name and path A notebook to load
+     * @param {string} notebook_path - A notebook to load
      */
-    Notebook.prototype.load_notebook = function (notebook_name, notebook_path) {
-        var that = this;
-        this.notebook_name = notebook_name;
+    Notebook.prototype.load_notebook = function (notebook_path) {
         this.notebook_path = notebook_path;
-        // We do the call with settings so we can set cache to false.
-        var settings = {
-            processData : false,
-            cache : false,
-            type : "GET",
-            dataType : "json",
-            success : $.proxy(this.load_notebook_success,this),
-            error : $.proxy(this.load_notebook_error,this),
-        };
+        this.notebook_name = utils.url_path_split(this.notebook_path)[1];
         this.events.trigger('notebook_loading.Notebook');
-        var url = utils.url_join_encode(
-            this.base_url,
-            'api/contents',
-            this.notebook_path,
-            this.notebook_name
+        this.contents.get(notebook_path, {type: 'notebook'}).then(
+            $.proxy(this.load_notebook_success, this),
+            $.proxy(this.load_notebook_error, this)
         );
-        $.ajax(url, settings);
     };
 
     /**
@@ -2196,13 +2061,59 @@ define([
      * 
      * Load notebook data from the JSON response.
      * 
-     * @method load_notebook_success
-     * @param {Object} data JSON representation of a notebook
-     * @param {String} status Description of response status
-     * @param {jqXHR} xhr jQuery Ajax object
+     * @param {object} data JSON representation of a notebook
      */
-    Notebook.prototype.load_notebook_success = function (data, status, xhr) {
-        this.fromJSON(data);
+    Notebook.prototype.load_notebook_success = function (data) {
+        var failed, msg;
+        try {
+            this.fromJSON(data);
+        } catch (e) {
+            failed = e;
+            console.log("Notebook failed to load from JSON:", e);
+        }
+        if (failed || data.message) {
+            // *either* fromJSON failed or validation failed
+            var body = $("<div>");
+            var title;
+            if (failed) {
+                title = "Notebook failed to load";
+                body.append($("<p>").text(
+                    "The error was: "
+                )).append($("<div>").addClass("js-error").text(
+                    failed.toString()
+                )).append($("<p>").text(
+                    "See the error console for details."
+                ));
+            } else {
+                title = "Notebook validation failed";
+            }
+
+            if (data.message) {
+                if (failed) {
+                    msg = "The notebook also failed validation:";
+                } else {
+                    msg = "An invalid notebook may not function properly." +
+                    " The validation error was:";
+                }
+                body.append($("<p>").text(
+                    msg
+                )).append($("<div>").addClass("validation-error").append(
+                    $("<pre>").text(data.message)
+                ));
+            }
+
+            dialog.modal({
+                notebook: this,
+                keyboard_manager: this.keyboard_manager,
+                title: title,
+                body: body,
+                buttons : {
+                    OK : {
+                        "class" : "btn-primary"
+                    }
+                }
+            });
+        }
         if (this.ncells() === 0) {
             this.insert_cell_below('code');
             this.edit_mode(0);
@@ -2212,13 +2123,30 @@ define([
         }
         this.set_dirty(false);
         this.scroll_to_top();
-        if (data.orig_nbformat !== undefined && data.nbformat !== data.orig_nbformat) {
-            var msg = "This notebook has been converted from an older " +
-            "notebook format (v"+data.orig_nbformat+") to the current notebook " +
-            "format (v"+data.nbformat+"). The next time you save this notebook, the " +
-            "newer notebook format will be used and older versions of IPython " +
-            "may not be able to read it. To keep the older version, close the " +
-            "notebook without saving it.";
+        this.writable = data.writable || false;
+        var nbmodel = data.content;
+        var orig_nbformat = nbmodel.metadata.orig_nbformat;
+        var orig_nbformat_minor = nbmodel.metadata.orig_nbformat_minor;
+        if (orig_nbformat !== undefined && nbmodel.nbformat !== orig_nbformat) {
+            var src;
+            if (nbmodel.nbformat > orig_nbformat) {
+                src = " an older notebook format ";
+            } else {
+                src = " a newer notebook format ";
+            }
+            
+            msg = "This notebook has been converted from" + src +
+            "(v"+orig_nbformat+") to the current notebook " +
+            "format (v"+nbmodel.nbformat+"). The next time you save this notebook, the " +
+            "current notebook format will be used.";
+            
+            if (nbmodel.nbformat > orig_nbformat) {
+                msg += " Older versions of IPython may not be able to read the new format.";
+            } else {
+                msg += " Some features of the original notebook may not be available.";
+            }
+            msg += " To preserve the original version, close the " +
+                "notebook without saving it.";
             dialog.modal({
                 notebook: this,
                 keyboard_manager: this.keyboard_manager,
@@ -2230,34 +2158,20 @@ define([
                     }
                 }
             });
-        } else if (data.orig_nbformat_minor !== undefined && data.nbformat_minor !== data.orig_nbformat_minor) {
-            var that = this;
-            var orig_vs = 'v' + data.nbformat + '.' + data.orig_nbformat_minor;
-            var this_vs = 'v' + data.nbformat + '.' + this.nbformat_minor;
-            var msg = "This notebook is version " + orig_vs + ", but we only fully support up to " +
-            this_vs + ".  You can still work with this notebook, but some features " +
-            "introduced in later notebook versions may not be available.";
-
-            dialog.modal({
-                notebook: this,
-                keyboard_manager: this.keyboard_manager,
-                title : "Newer Notebook",
-                body : msg,
-                buttons : {
-                    OK : {
-                        class : "btn-danger"
-                    }
-                }
-            });
-
+        } else if (this.nbformat_minor < nbmodel.nbformat_minor) {
+            this.nbformat_minor = nbmodel.nbformat_minor;
         }
         
         // Create the session after the notebook is completely loaded to prevent
         // code execution upon loading, which is a security risk.
         if (this.session === null) {
-            var kernelspec = this.metadata.kernelspec || {};
-            var kernel_name = kernelspec.name || this.default_kernel_name;
-
+            var kernel_name;
+            if (this.metadata.kernelspec) {
+                var kernelspec = this.metadata.kernelspec || {};
+                kernel_name = kernelspec.name;
+            } else {
+                kernel_name = utils.get_url_param('kernel_name');
+            }
             this.start_session(kernel_name);
         }
         // load our checkpoint list
@@ -2270,30 +2184,36 @@ define([
         } else {
             celltoolbar.CellToolbar.global_hide();
         }
-
+        
+        if (!this.writable) {
+            this.set_autosave_interval(0);
+            this.events.trigger('notebook_read_only.Notebook');
+        }
+        
         // now that we're fully loaded, it is safe to restore save functionality
-        delete(this.save_notebook);
+        this._fully_loaded = true;
         this.events.trigger('notebook_loaded.Notebook');
+    };
+
+    Notebook.prototype.set_kernelselector = function(k_selector){
+        this.kernel_selector = k_selector;
     };
 
     /**
      * Failure callback for loading a notebook from the server.
      * 
-     * @method load_notebook_error
-     * @param {jqXHR} xhr jQuery Ajax object
-     * @param {String} status Description of response status
-     * @param {String} error HTTP error message
+     * @param {Error} error
      */
-    Notebook.prototype.load_notebook_error = function (xhr, status, error) {
-        this.events.trigger('notebook_load_failed.Notebook', [xhr, status, error]);
-        utils.log_ajax_error(xhr, status, error);
+    Notebook.prototype.load_notebook_error = function (error) {
+        this.events.trigger('notebook_load_failed.Notebook', error);
         var msg;
-        if (xhr.status === 400) {
-            msg = escape(utils.ajax_error_msg(xhr));
-        } else if (xhr.status === 500) {
+        if (error.name === utils.XHR_ERROR && error.xhr.status === 500) {
+            utils.log_ajax_error(error.xhr, error.xhr_status, error.xhr_error);
             msg = "An unknown error occurred while loading this notebook. " +
             "This version can load notebook formats " +
             "v" + this.nbformat + " or earlier. See the server log for details.";
+        } else {
+            msg = error.message;
         }
         dialog.modal({
             notebook: this,
@@ -2306,12 +2226,10 @@ define([
         });
     };
 
-    /*********************  checkpoint-related  *********************/
+    /*********************  checkpoint-related  ********************/
     
     /**
      * Save the notebook then immediately create a checkpoint.
-     * 
-     * @method save_checkpoint
      */
     Notebook.prototype.save_checkpoint = function () {
         this._checkpoint_after_save = true;
@@ -2320,9 +2238,6 @@ define([
     
     /**
      * Add a checkpoint for this notebook.
-     * for use as a callback from checkpoint creation.
-     * 
-     * @method add_checkpoint
      */
     Notebook.prototype.add_checkpoint = function (checkpoint) {
         var found = false;
@@ -2342,34 +2257,23 @@ define([
     
     /**
      * List checkpoints for this notebook.
-     * 
-     * @method list_checkpoints
      */
     Notebook.prototype.list_checkpoints = function () {
-        var url = utils.url_join_encode(
-            this.base_url,
-            'api/contents',
-            this.notebook_path,
-            this.notebook_name,
-            'checkpoints'
-        );
-        $.get(url).done(
-            $.proxy(this.list_checkpoints_success, this)
-        ).fail(
-            $.proxy(this.list_checkpoints_error, this)
+        var that = this;
+        this.contents.list_checkpoints(this.notebook_path).then(
+            $.proxy(this.list_checkpoints_success, this),
+            function(error) {
+                that.events.trigger('list_checkpoints_failed.Notebook', error);
+            }
         );
     };
 
     /**
      * Success callback for listing checkpoints.
      * 
-     * @method list_checkpoint_success
-     * @param {Object} data JSON representation of a checkpoint
-     * @param {String} status Description of response status
-     * @param {jqXHR} xhr jQuery Ajax object
+     * @param {object} data - JSON representation of a checkpoint
      */
-    Notebook.prototype.list_checkpoints_success = function (data, status, xhr) {
-        data = $.parseJSON(data);
+    Notebook.prototype.list_checkpoints_success = function (data) {
         this.checkpoints = data;
         if (data.length) {
             this.last_checkpoint = data[data.length - 1];
@@ -2380,63 +2284,32 @@ define([
     };
 
     /**
-     * Failure callback for listing a checkpoint.
-     * 
-     * @method list_checkpoint_error
-     * @param {jqXHR} xhr jQuery Ajax object
-     * @param {String} status Description of response status
-     * @param {String} error_msg HTTP error message
-     */
-    Notebook.prototype.list_checkpoints_error = function (xhr, status, error_msg) {
-        this.events.trigger('list_checkpoints_failed.Notebook');
-    };
-    
-    /**
      * Create a checkpoint of this notebook on the server from the most recent save.
-     * 
-     * @method create_checkpoint
      */
     Notebook.prototype.create_checkpoint = function () {
-        var url = utils.url_join_encode(
-            this.base_url,
-            'api/contents',
-            this.notebook_path,
-            this.notebook_name,
-            'checkpoints'
-        );
-        $.post(url).done(
-            $.proxy(this.create_checkpoint_success, this)
-        ).fail(
-            $.proxy(this.create_checkpoint_error, this)
+        var that = this;
+        this.contents.create_checkpoint(this.notebook_path).then(
+            $.proxy(this.create_checkpoint_success, this),
+            function (error) {
+                that.events.trigger('checkpoint_failed.Notebook', error);
+            }
         );
     };
 
     /**
      * Success callback for creating a checkpoint.
      * 
-     * @method create_checkpoint_success
-     * @param {Object} data JSON representation of a checkpoint
-     * @param {String} status Description of response status
-     * @param {jqXHR} xhr jQuery Ajax object
+     * @param {object} data - JSON representation of a checkpoint
      */
-    Notebook.prototype.create_checkpoint_success = function (data, status, xhr) {
-        data = $.parseJSON(data);
+    Notebook.prototype.create_checkpoint_success = function (data) {
         this.add_checkpoint(data);
         this.events.trigger('checkpoint_created.Notebook', data);
     };
 
     /**
-     * Failure callback for creating a checkpoint.
-     * 
-     * @method create_checkpoint_error
-     * @param {jqXHR} xhr jQuery Ajax object
-     * @param {String} status Description of response status
-     * @param {String} error_msg HTTP error message
+     * Display the restore checkpoint dialog
+     * @param  {string} checkpoint ID
      */
-    Notebook.prototype.create_checkpoint_error = function (xhr, status, error_msg) {
-        this.events.trigger('checkpoint_failed.Notebook');
-    };
-    
     Notebook.prototype.restore_checkpoint_dialog = function (checkpoint) {
         var that = this;
         checkpoint = checkpoint || this.last_checkpoint;
@@ -2481,97 +2354,49 @@ define([
     /**
      * Restore the notebook to a checkpoint state.
      * 
-     * @method restore_checkpoint
-     * @param {String} checkpoint ID
+     * @param {string} checkpoint ID
      */
     Notebook.prototype.restore_checkpoint = function (checkpoint) {
         this.events.trigger('notebook_restoring.Notebook', checkpoint);
-        var url = utils.url_join_encode(
-            this.base_url,
-            'api/contents',
-            this.notebook_path,
-            this.notebook_name,
-            'checkpoints',
-            checkpoint
-        );
-        $.post(url).done(
-            $.proxy(this.restore_checkpoint_success, this)
-        ).fail(
-            $.proxy(this.restore_checkpoint_error, this)
+        var that = this;
+        this.contents.restore_checkpoint(this.notebook_path, checkpoint).then(
+            $.proxy(this.restore_checkpoint_success, this),
+            function (error) {
+                that.events.trigger('checkpoint_restore_failed.Notebook', error);
+            }
         );
     };
     
     /**
      * Success callback for restoring a notebook to a checkpoint.
-     * 
-     * @method restore_checkpoint_success
-     * @param {Object} data (ignored, should be empty)
-     * @param {String} status Description of response status
-     * @param {jqXHR} xhr jQuery Ajax object
      */
-    Notebook.prototype.restore_checkpoint_success = function (data, status, xhr) {
+    Notebook.prototype.restore_checkpoint_success = function () {
         this.events.trigger('checkpoint_restored.Notebook');
-        this.load_notebook(this.notebook_name, this.notebook_path);
+        this.load_notebook(this.notebook_path);
     };
 
-    /**
-     * Failure callback for restoring a notebook to a checkpoint.
-     * 
-     * @method restore_checkpoint_error
-     * @param {jqXHR} xhr jQuery Ajax object
-     * @param {String} status Description of response status
-     * @param {String} error_msg HTTP error message
-     */
-    Notebook.prototype.restore_checkpoint_error = function (xhr, status, error_msg) {
-        this.events.trigger('checkpoint_restore_failed.Notebook');
-    };
-    
     /**
      * Delete a notebook checkpoint.
      * 
-     * @method delete_checkpoint
-     * @param {String} checkpoint ID
+     * @param {string} checkpoint ID
      */
     Notebook.prototype.delete_checkpoint = function (checkpoint) {
         this.events.trigger('notebook_restoring.Notebook', checkpoint);
-        var url = utils.url_join_encode(
-            this.base_url,
-            'api/contents',
-            this.notebook_path,
-            this.notebook_name,
-            'checkpoints',
-            checkpoint
+        var that = this;
+        this.contents.delete_checkpoint(this.notebook_path, checkpoint).then(
+            $.proxy(this.delete_checkpoint_success, this),
+            function (error) {
+                that.events.trigger('checkpoint_delete_failed.Notebook', error);
+            }
         );
-        $.ajax(url, {
-            type: 'DELETE',
-            success: $.proxy(this.delete_checkpoint_success, this),
-            error: $.proxy(this.delete_checkpoint_error, this)
-        });
     };
     
     /**
-     * Success callback for deleting a notebook checkpoint
-     * 
-     * @method delete_checkpoint_success
-     * @param {Object} data (ignored, should be empty)
-     * @param {String} status Description of response status
-     * @param {jqXHR} xhr jQuery Ajax object
+     * Success callback for deleting a notebook checkpoint.
      */
-    Notebook.prototype.delete_checkpoint_success = function (data, status, xhr) {
-        this.events.trigger('checkpoint_deleted.Notebook', data);
-        this.load_notebook(this.notebook_name, this.notebook_path);
-    };
-
-    /**
-     * Failure callback for deleting a notebook checkpoint.
-     * 
-     * @method delete_checkpoint_error
-     * @param {jqXHR} xhr jQuery Ajax object
-     * @param {String} status Description of response status
-     * @param {String} error HTTP error message
-     */
-    Notebook.prototype.delete_checkpoint_error = function (xhr, status, error) {
-        this.events.trigger('checkpoint_delete_failed.Notebook', [xhr, status, error]);
+    Notebook.prototype.delete_checkpoint_success = function () {
+        this.events.trigger('checkpoint_deleted.Notebook');
+        this.load_notebook(this.notebook_path);
     };
 
 
