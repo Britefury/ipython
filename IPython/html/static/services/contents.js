@@ -1,12 +1,12 @@
 // Copyright (c) IPython Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-define([
-    'base/js/namespace',
-    'jquery',
-    'base/js/utils',
-], function(IPython, $, utils) {
+define(function(require) {
     "use strict";
+
+    var $ = require('jquery');
+    var utils = require('base/js/utils');
+
     var Contents = function(options) {
         /**
          * Constructor
@@ -72,13 +72,12 @@ define([
     /**
      * Get a file.
      *
-     * Calls success with file JSON model, or error with error.
-     *
      * @method get
      * @param {String} path
      * @param {Object} options
      *    type : 'notebook', 'file', or 'directory'
      *    format: 'text' or 'base64'; only relevant for type: 'file'
+     *    content: true or false; // whether to include the content
      */
     Contents.prototype.get = function (path, options) {
         /**
@@ -94,6 +93,7 @@ define([
         var params = {};
         if (options.type) { params.type = options.type; }
         if (options.format) { params.format = options.format; }
+        if (options.content === false) { params.content = '0'; }
         return utils.promising_ajax(url + '?' + $.param(params), settings);
     };
 
@@ -244,9 +244,6 @@ define([
     Contents.prototype.list_contents = function(path) {
         return this.get(path, {type: 'directory'});
     };
-
-
-    IPython.Contents = Contents;
 
     return {'Contents': Contents};
 });

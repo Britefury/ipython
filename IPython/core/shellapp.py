@@ -2,23 +2,10 @@
 """
 A mixin for :class:`~IPython.core.application.Application` classes that
 launch InteractiveShell instances, load extensions, etc.
-
-Authors
--------
-
-* Min Ragan-Kelley
 """
 
-#-----------------------------------------------------------------------------
-#  Copyright (C) 2008-2011  The IPython Development Team
-#
-#  Distributed under the terms of the BSD License.  The full license is in
-#  the file COPYING, distributed as part of this software.
-#-----------------------------------------------------------------------------
-
-#-----------------------------------------------------------------------------
-# Imports
-#-----------------------------------------------------------------------------
+# Copyright (c) IPython Development Team.
+# Distributed under the terms of the Modified BSD License.
 
 from __future__ import absolute_import
 from __future__ import print_function
@@ -76,15 +63,11 @@ addflag('pprint', 'PlainTextFormatter.pprint',
     "Disable auto pretty printing of results."
 )
 addflag('color-info', 'InteractiveShell.color_info',
-    """IPython can display information about objects via a set of func-
-    tions, and optionally can use colors for this, syntax highlighting
-    source code and various other elements.  However, because this
-    information is passed through a pager (like 'less') and many pagers get
-    confused with color codes, this option is off by default.  You can test
-    it and turn it on permanently in your ipython_config.py file if it
-    works for you.  Test it and turn it on permanently if it works with
-    your system.  The magic function %%color_info allows you to toggle this
-    interactively for testing.""",
+    """IPython can display information about objects via a set of functions,
+    and optionally can use colors for this, syntax highlighting
+    source code and various other elements. This is on by default, but can cause
+    problems with some pagers. If you see such problems, you can disable the
+    colours.""",
     "Disable using colors for info related things."
 )
 addflag('deep-reload', 'InteractiveShell.deep_reload',
@@ -156,11 +139,13 @@ class InteractiveShellApp(Configurable):
     extra_extension = Unicode('', config=True,
         help="dotted module name of an IPython extension to load."
     )
-    def _extra_extension_changed(self, name, old, new):
-        if new:
-            # add to self.extensions
-            self.extensions.append(new)
-    
+
+    reraise_ipython_extension_failures = Bool(
+        False,
+        config=True,
+        help="Reraise exceptions encountered loading IPython extensions?",
+    )
+
     # Extensions that are always loaded (not configurable)
     default_extensions = List(Unicode, [u'storemagic'], config=False)
     
@@ -273,11 +258,15 @@ class InteractiveShellApp(Configurable):
         try:
             self.log.debug("Loading IPython extensions...")
             extensions = self.default_extensions + self.extensions
+            if self.extra_extension:
+                extensions.append(self.extra_extension)
             for ext in extensions:
                 try:
                     self.log.info("Loading IPython extension: %s" % ext)
                     self.shell.extension_manager.load_extension(ext)
                 except:
+                    if self.reraise_ipython_extension_failures:
+                        raise
                     msg = ("Error in loading extension: {ext}\n"
                            "Check your config files in {location}".format(
                                ext=ext,
@@ -285,6 +274,8 @@ class InteractiveShellApp(Configurable):
                            ))
                     self.log.warn(msg, exc_info=True)
         except:
+            if self.reraise_ipython_extension_failures:
+                raise
             self.log.warn("Unknown error in loading extensions:", exc_info=True)
 
     def init_code(self):

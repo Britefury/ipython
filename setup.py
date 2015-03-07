@@ -214,8 +214,7 @@ class UploadWindowsInstallers(upload):
 
 setup_args['cmdclass'] = {
     'build_py': css_js_prerelease(
-            check_package_data_first(git_prebuild('IPython')),
-        strict=False),
+            check_package_data_first(git_prebuild('IPython'))),
     'sdist' : css_js_prerelease(git_prebuild('IPython', sdist)),
     'upload_wininst' : UploadWindowsInstallers,
     'submodule' : UpdateSubmodules,
@@ -247,28 +246,27 @@ setuptools_extra_args = {}
 
 # setuptools requirements
 
+pyzmq = 'pyzmq>=13'
+
 extras_require = dict(
-    parallel = ['pyzmq>=2.1.11'],
-    qtconsole = ['pyzmq>=2.1.11', 'pygments'],
-    zmq = ['pyzmq>=2.1.11'],
+    parallel = [pyzmq],
+    qtconsole = [pyzmq, 'pygments'],
     doc = ['Sphinx>=1.1', 'numpydoc'],
     test = ['nose>=0.10.1', 'requests'],
     terminal = [],
     nbformat = ['jsonschema>=2.0'],
-    notebook = ['tornado>=4.0', 'pyzmq>=2.1.11', 'jinja2', 'pygments', 'mistune>=0.5'],
+    notebook = ['tornado>=4.0', pyzmq, 'jinja2', 'pygments', 'mistune>=0.5'],
     nbconvert = ['pygments', 'jinja2', 'mistune>=0.3.1']
 )
+
+if not sys.platform.startswith('win'):
+    extras_require['notebook'].append('terminado>=0.3.3')
 
 if sys.version_info < (3, 3):
     extras_require['test'].append('mock')
 
 extras_require['notebook'].extend(extras_require['nbformat'])
 extras_require['nbconvert'].extend(extras_require['nbformat'])
-
-everything = set()
-for deps in extras_require.values():
-    everything.update(deps)
-extras_require['all'] = everything
 
 install_requires = []
 
@@ -279,6 +277,10 @@ if sys.platform == 'darwin':
 elif sys.platform.startswith('win'):
     extras_require['terminal'].append('pyreadline>=2.0')
 
+everything = set()
+for deps in extras_require.values():
+    everything.update(deps)
+extras_require['all'] = everything
 
 if 'setuptools' in sys.modules:
     # setup.py develop should check for submodules
@@ -287,7 +289,14 @@ if 'setuptools' in sys.modules:
     setup_args['cmdclass']['bdist_wheel'] = css_js_prerelease(get_bdist_wheel())
     
     setuptools_extra_args['zip_safe'] = False
-    setuptools_extra_args['entry_points'] = {'console_scripts':find_entry_points()}
+    setuptools_extra_args['entry_points'] = {
+        'console_scripts': find_entry_points(),
+        'pygments.lexers': [
+            'ipythonconsole = IPython.lib.lexers:IPythonConsoleLexer',
+            'ipython = IPython.lib.lexers:IPythonLexer',
+            'ipython3 = IPython.lib.lexers:IPython3Lexer',
+        ],
+    }
     setup_args['extras_require'] = extras_require
     requires = setup_args['install_requires'] = install_requires
 
@@ -298,7 +307,7 @@ if 'setuptools' in sys.modules:
     if 'bdist_wininst' in sys.argv:
         if len(sys.argv) > 2 and \
                ('sdist' in sys.argv or 'bdist_rpm' in sys.argv):
-            print >> sys.stderr, "ERROR: bdist_wininst must be run alone. Exiting."
+            print("ERROR: bdist_wininst must be run alone. Exiting.", file=sys.stderr)
             sys.exit(1)
         setup_args['data_files'].append(
             ['Scripts', ('scripts/ipython.ico', 'scripts/ipython_nb.ico')])

@@ -4,17 +4,25 @@
 }
 
 .indicator_area {
+    .pull-right();
     color: @navbar-default-link-color;
     margin-left: 5px;
     margin-right: 5px;
     width: 11px;
     z-index: 10;
     text-align: center;
+    width: auto;
 }
 
 #kernel_indicator {
-    .pull-right();
     .indicator_area();
+    
+    border-left: 1px solid;
+    
+    .kernel_indicator_name {
+        padding-left: 5px;
+        padding-right: 5px;
+    }
 }
 
 #modal_indicator {
@@ -22,11 +30,28 @@
     .indicator_area();
 }
 
-.edit_mode_icon:before {
-    .icon(@fa-var-pencil)
+#readonly-indicator {
+    .pull-right();
+    .indicator_area();
+
+    margin-top: 2px;
+    margin-bottom: 0px;
+    margin-left: 0px;
+    margin-right: 0px;
+
+    // Start out hidden.
+    display: none;
 }
 
-.command_mode_icon:before {
+.modal_indicator:before {
+    .fa-fw();
+}
+
+.edit_mode .modal_indicator:before {
+    .icon(@fa-var-pencil);
+}
+
+.command_mode .modal_indicator:before {
     .icon(' ');
 }
 

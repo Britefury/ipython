@@ -79,9 +79,10 @@ class TestExecute(PreprocessorTestsBase):
         current_dir = os.path.dirname(__file__)
         input_files = glob.glob(os.path.join(current_dir, 'files', '*.ipynb'))
         for filename in input_files:
-            with io.open(os.path.join(current_dir, 'files', filename)) as f:
+            with io.open(filename) as f:
                 input_nb = nbformat.read(f, 4)
             res = self.build_resources()
+            res['metadata']['path'] = os.path.dirname(filename)
             preprocessor = self.build_preprocessor()
             cleaned_input_nb = copy.deepcopy(input_nb)
             for cell in cleaned_input_nb.cells:
@@ -89,4 +90,35 @@ class TestExecute(PreprocessorTestsBase):
                     del cell['execution_count']
                 cell['outputs'] = []
             output_nb, _ = preprocessor(cleaned_input_nb, res)
-            self.assert_notebooks_equal(output_nb, input_nb)
+
+            if os.path.basename(filename) == "Disable Stdin.ipynb":
+                # We need to special-case this particular notebook, because the
+                # traceback contains machine-specific stuff like where IPython
+                # is installed. It is sufficient here to just check that an error
+                # was thrown, and that it was a StdinNotImplementedError
+                self.assertEqual(len(output_nb['cells']), 1)
+                self.assertEqual(len(output_nb['cells'][0]['outputs']), 1)
+                output = output_nb['cells'][0]['outputs'][0]
+                self.assertEqual(output['output_type'], 'error')
+                self.assertEqual(output['ename'], 'StdinNotImplementedError')
+                self.assertEqual(output['evalue'], 'raw_input was called, but this frontend does not support input requests.')
+
+            else:
+                self.assert_notebooks_equal(output_nb, input_nb)
+
+    def test_empty_path(self):
+        """Can the kernel be started when the path is empty?"""
+        current_dir = os.path.dirname(__file__)
+        filename = os.path.join(current_dir, 'files', 'HelloWorld.ipynb')
+        with io.open(filename) as f:
+            input_nb = nbformat.read(f, 4)
+        res = self.build_resources()
+        res['metadata']['path'] = ''
+        preprocessor = self.build_preprocessor()
+        cleaned_input_nb = copy.deepcopy(input_nb)
+        for cell in cleaned_input_nb.cells:
+            if 'execution_count' in cell:
+                del cell['execution_count']
+            cell['outputs'] = []
+        output_nb, _ = preprocessor(cleaned_input_nb, res)
+        self.assert_notebooks_equal(output_nb, input_nb)

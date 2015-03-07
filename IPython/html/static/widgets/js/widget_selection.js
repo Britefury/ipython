@@ -5,8 +5,9 @@ define([
     "widgets/js/widget",
     "base/js/utils",
     "jquery",
+    "underscore",
     "bootstrap",
-], function(widget, utils, $){
+], function(widget, utils, $, _){
 
     var DropdownView = widget.DOMWidgetView.extend({
         render : function(){
@@ -52,19 +53,19 @@ define([
             /**
              * Update the contents of this view
              *
-             * Called when the model is changed.  The model may have been 
+             * Called when the model is changed.  The model may have been
              * changed by another view or by a state update from the back-end.
              */
 
             if (options === undefined || options.updated_view != this) {
-                var selected_item_text = this.model.get('value_name');
+                var selected_item_text = this.model.get('selected_label');
                 if (selected_item_text.trim().length === 0) {
                     this.$droplabel.html("&nbsp;");
                 } else {
                     this.$droplabel.text(selected_item_text);
                 }
                 
-                var items = this.model.get('_value_names');
+                var items = this.model.get('_options_labels');
                 var $replace_droplist = $('<ul />')
                     .addClass('dropdown-menu');
                 // Copy the style
@@ -150,7 +151,7 @@ define([
              * Calling model.set will trigger all of the other views of the 
              * model to update.
              */
-            this.model.set('value_name', $(e.target).text(), {updated_view: this});
+            this.model.set('selected_label', $(e.target).text(), {updated_view: this});
             this.touch();
 
             // Manually hide the droplist.
@@ -188,11 +189,11 @@ define([
              */
             if (options === undefined || options.updated_view != this) {
                 // Add missing items to the DOM.
-                var items = this.model.get('_value_names');
+                var items = this.model.get('_options_labels');
                 var disabled = this.model.get('disabled');
                 var that = this;
                 _.each(items, function(item, index) {
-                    var item_query = ' :input[value="' + item + '"]';
+                    var item_query = ' :input[data-value="' + encodeURIComponent(item) + '"]';
                     if (that.$el.find(item_query).length === 0) {
                         var $label = $('<label />')
                             .addClass('radio')
@@ -203,12 +204,13 @@ define([
                             .attr('type', 'radio')
                             .addClass(that.model)
                             .val(item)
+                            .attr('data-value', encodeURIComponent(item))
                             .prependTo($label)
                             .on('click', $.proxy(that.handle_click, that));
                     }
                     
                     var $item_element = that.$container.find(item_query);
-                    if (that.model.get('value_name') == item) {
+                    if (that.model.get('selected_label') == item) {
                         $item_element.prop('checked', true);
                     } else {
                         $item_element.prop('checked', false);
@@ -262,7 +264,7 @@ define([
              * Calling model.set will trigger all of the other views of the 
              * model to update.
              */
-            this.model.set('value_name', $(e.target).val(), {updated_view: this});
+            this.model.set('selected_label', $(e.target).val(), {updated_view: this});
             this.touch();
         },
     });
@@ -286,7 +288,6 @@ define([
                 .hide();
             this.$buttongroup = $('<div />')
                 .addClass('btn-group')
-                .attr('data-toggle', 'buttons-radio')
                 .appendTo(this.$el);
 
             this.model.on('change:button_style', function(model, value) {
@@ -305,39 +306,50 @@ define([
              */
             if (options === undefined || options.updated_view != this) {
                 // Add missing items to the DOM.
-                var items = this.model.get('_value_names');
+                var items = this.model.get('_options_labels');
+                var icons = this.model.get('icons');
+                var previous_icons = this.model.previous('icons') || [];
                 var disabled = this.model.get('disabled');
                 var that = this;
                 var item_html;
                 _.each(items, function(item, index) {
-                    if (item.trim().length == 0) {
+                    if (item.trim().length === 0 && (!icons[index] ||
+                        icons[index].trim().length === 0)) {
                         item_html = "&nbsp;";
                     } else {
                         item_html = utils.escape_html(item);
                     }
-                    var item_query = '[data-value="' + item + '"]';
+                    var item_query = '[data-value="' + encodeURIComponent(item) + '"]';
                     var $item_element = that.$buttongroup.find(item_query);
+                    var $icon_element = $item_element.find('.fa');
                     if (!$item_element.length) {
                         $item_element = $('<button/>')
                             .attr('type', 'button')
                             .addClass('btn btn-default')
                             .html(item_html)
                             .appendTo(that.$buttongroup)
-                            .attr('data-value', item)
+                            .attr('data-value', encodeURIComponent(item))
+                            .attr('data-toggle', 'tooltip')
+                            .attr('value', item)
                             .on('click', $.proxy(that.handle_click, that));
                         that.update_style_traits($item_element);
+                        $icon_element = $('<i class="fa"></i>').prependTo($item_element);
                     }
-                    if (that.model.get('value_name') == item) {
+                    if (that.model.get('selected_label') == item) {
                         $item_element.addClass('active');
                     } else {
                         $item_element.removeClass('active');
                     }
-                    $item_element.prop('disabled', disabled); 
+                    $item_element.prop('disabled', disabled);
+                    $item_element.attr('title', that.model.get('tooltips')[index]);
+                    $icon_element
+                        .removeClass(previous_icons[index])
+                        .addClass(icons[index]);
                 });
                 
                 // Remove items that no longer exist.
                 this.$buttongroup.find('button').each(function(i, obj) {
-                    var value = $(obj).data('value');
+                    var value = $(obj).attr('value');
                     var found = false;
                     _.each(items, function(item, index) {
                         if (item == value) {
@@ -409,7 +421,7 @@ define([
              * Calling model.set will trigger all of the other views of the 
              * model to update.
              */
-            this.model.set('value_name', $(e.target).data('value'), {updated_view: this});
+            this.model.set('selected_label', $(e.target).attr('value'), {updated_view: this});
             this.touch();
         },    
     });
@@ -429,7 +441,8 @@ define([
             this.$listbox = $('<select />')
                 .addClass('widget-listbox form-control')
                 .attr('size', 6)
-                .appendTo(this.$el);
+                .appendTo(this.$el)
+                .on('change', $.proxy(this.handle_change, this));
             this.update();
         },
         
@@ -442,21 +455,22 @@ define([
              */
             if (options === undefined || options.updated_view != this) {
                 // Add missing items to the DOM.
-                var items = this.model.get('_value_names');
+                var items = this.model.get('_options_labels');
                 var that = this;
                 _.each(items, function(item, index) {
-                   var item_query = 'option[value_name="' + item + '"]';
+                   var item_query = 'option[data-value="' + encodeURIComponent(item) + '"]';
                     if (that.$listbox.find(item_query).length === 0) {
                         $('<option />')
                             .text(item)
-                            .attr('value_name', item)
-                            .appendTo(that.$listbox)
-                            .on('click', $.proxy(that.handle_click, that));
+                            .attr('data-value', encodeURIComponent(item))
+                            .attr('selected_label', item)
+                            .on("click", $.proxy(that.handle_click, that))
+                            .appendTo(that.$listbox);
                     } 
                 });
 
                 // Select the correct element
-                this.$listbox.val(this.model.get('value_name'));
+                this.$listbox.val(this.model.get('selected_label'));
                 
                 // Disable listbox if needed
                 var disabled = this.model.get('disabled');
@@ -502,20 +516,68 @@ define([
 
         handle_click: function (e) {
             /**
-             * Handle when a value is clicked.
+             * Handle when a new value is clicked.
+             */
+            this.$listbox.val($(e.target).val()).change();
+        },
+
+        handle_change: function (e) {
+            /**
+             * Handle when a new value is selected.
              *
              * Calling model.set will trigger all of the other views of the 
              * model to update.
              */
-            this.model.set('value_name', $(e.target).text(), {updated_view: this});
+            this.model.set('selected_label', this.$listbox.val(), {updated_view: this});
             this.touch();
-        },    
+        },
+    });
+
+
+    var SelectMultipleView = SelectView.extend({
+        render: function(){
+            /**
+             * Called when view is rendered.
+             */
+            SelectMultipleView.__super__.render.apply(this);
+            this.$el.removeClass('widget-select')
+              .addClass('widget-select-multiple');
+            this.$listbox.attr('multiple', true)
+              .on('change', $.proxy(this.handle_change, this));
+            return this;
+        },
+
+        update: function(){
+            /**
+             * Update the contents of this view
+             *
+             * Called when the model is changed.  The model may have been 
+             * changed by another view or by a state update from the back-end.
+             */
+            SelectMultipleView.__super__.update.apply(this, arguments);
+            this.$listbox.val(this.model.get('selected_labels'));
+        },
+
+        handle_change: function (e) {
+            /**
+             * Handle when a new value is selected.
+             *
+             * Calling model.set will trigger all of the other views of the 
+             * model to update.
+             */
+            this.model.set('selected_labels',
+                (this.$listbox.val() || []).slice(),
+                {updated_view: this});
+            this.touch();
+        },
     });
     
+
     return {
         'DropdownView': DropdownView,
         'RadioButtonsView': RadioButtonsView,
         'ToggleButtonsView': ToggleButtonsView,
         'SelectView': SelectView,
+        'SelectMultipleView': SelectMultipleView,
     };
 });

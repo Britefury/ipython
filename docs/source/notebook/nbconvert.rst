@@ -43,20 +43,23 @@ The currently supported export formats are:
 * ``--to latex``
 
   Latex export.  This generates ``NOTEBOOK_NAME.tex`` file,
-  ready for export.  You can automatically run latex on it to generate a PDF
-  by adding ``--post PDF``.
+  ready for export.
   
   - ``--template article`` (default)
   
     Latex article, derived from Sphinx's howto template.
 
-  - ``--template book``
+  - ``--template report``
   
-    Latex book, derived from Sphinx's manual template.
+    Latex report, providing a table of contents and chapters.
 
   - ``--template basic``
   
     Very basic latex output - mainly meant as a starting point for custom templates.
+
+* ``--to pdf``
+
+  Generates a PDF via latex. Supports the same templates as ``--to latex``.
 
 * ``--to slides``
 
@@ -78,18 +81,44 @@ The currently supported export formats are:
   Basic reStructuredText output. Useful as a starting point for embedding notebooks
   in Sphinx docs.
 
-* ``--to python``
+* ``--to script``
 
-  Convert a notebook to an executable Python script.
-  This is the simplest way to get a Python script out of a notebook.
-  If there were any magics in the notebook, this may only be executable from
+  Convert a notebook to an executable script.
+  This is the simplest way to get a Python (or other language, depending on the kernel) script out of a notebook.
+  If there were any magics in an IPython notebook, this may only be executable from
   an IPython session.
+
+* ``--to notebook``
+
+  .. versionadded:: 3.0
+  
+  This doesn't convert a notebook to a different format *per se*,
+  instead it allows the running of nbconvert preprocessors on a notebook,
+  and/or conversion to other notebook formats. For example::
+  
+      ipython nbconvert --to notebook --execute mynotebook.ipynb
+  
+  will open the notebook, execute it, capture new output, and save the result in
+  :file:`mynotebook.nbconvert.ipynb`.
+  
+  ::
+  
+      ipython nbconvert --to notebook --nbformat 3 mynotebook
+  
+  will create a copy of :file:`mynotebook.ipynb` in :file:`mynotebook.v3.ipynb`
+  in version 3 of the :ref:`notebook format <nbformat>`.
+  
+  If you want to convert a notebook in-place,
+  you can specify the ouptut file to be the same as the input file::
+  
+      ipython nbconvert --to notebook mynb --output mynb
+  
+  Be careful with that, since it will replace the input file.
   
 .. note::
 
   nbconvert uses pandoc_ to convert between various markup languages,
-  so pandoc is a dependency of most nbconvert transforms,
-  excluding Markdown and Python.
+  so pandoc is a dependency when converting to latex or reStructuredText.
 
 .. _pandoc: http://johnmacfarlane.net/pandoc/
 
@@ -122,8 +151,6 @@ and using the command::
   $ ipython nbconvert --config mycfg.py
 
 
-.. _notebook_format:
-
 LaTeX citations
 ---------------
 
@@ -139,92 +166,3 @@ the nbconvert-examples_ repository.
 
 .. _nbconvert-examples: https://github.com/ipython/nbconvert-examples
 
-Notebook JSON file format
--------------------------
-
-Notebook documents are JSON files with an ``.ipynb`` extension, formatted
-as legibly as possible with minimal extra indentation and cell content broken
-across lines to make them reasonably friendly to use in version-control
-workflows.  You should be very careful if you ever manually edit this JSON
-data, as it is extremely easy to corrupt its internal structure and make the
-file impossible to load.  In general, you should consider the notebook as a
-file meant only to be edited by the IPython Notebook app itself, not for 
-hand-editing.
-
-.. note::
-
-     Binary data such as figures are also saved directly in the JSON file.  
-     This provides convenient single-file portability, but means that the 
-     files can be large; a ``diff`` of binary data is also not very 
-     meaningful.  Since the binary blobs are encoded in a single line, they 
-     affect only one line of the ``diff`` output, but they are typically very 
-     long lines.  You can use the ``Cell | All Output | Clear`` menu option to 
-     remove all output from a notebook prior to committing it to version 
-     control, if this is a concern.
-
-The notebook server can also generate a pure Python version of your notebook, 
-using the ``File | Download as`` menu option. The resulting ``.py`` file will 
-contain all the code cells from your notebook verbatim, and all Markdown cells 
-prepended with a comment marker.  The separation between code and Markdown
-cells is indicated with special comments and there is a header indicating the
-format version.  All output is removed when exporting to Python.
-
-As an example, consider a simple notebook called ``simple.ipynb`` which 
-contains one Markdown cell, with the content ``The simplest notebook.``, one 
-code input cell with the content ``print "Hello, IPython!"``, and the 
-corresponding output.
-
-The contents of the notebook document ``simple.ipynb`` is the following JSON 
-container::
-
-  {
-   "metadata": {
-    "name": "simple"
-   },
-   "nbformat": 3,
-   "nbformat_minor": 0,
-   "worksheets": [
-    {
-     "cells": [
-      {
-       "cell_type": "markdown",
-       "metadata": {},
-       "source": "The simplest notebook."
-      },
-      {
-       "cell_type": "code",
-       "collapsed": false,
-       "input": "print \"Hello, IPython\"",
-       "language": "python",
-       "metadata": {},
-       "outputs": [
-        {
-         "output_type": "stream",
-         "stream": "stdout",
-         "text": "Hello, IPython\n"
-        }
-       ],
-       "prompt_number": 1
-      }
-     ],
-     "metadata": {}
-    }
-   ]
-  }
-
-
-The corresponding Python script is::
-
-  # -*- coding: utf-8 -*-
-  # <nbformat>3.0</nbformat>
-
-  # <markdowncell>
-
-  # The simplest notebook.
-
-  # <codecell>
-
-  print "Hello, IPython"
-
-Note that indeed the output of the code cell, which is present in the JSON 
-container, has been removed in the ``.py`` script.

@@ -21,7 +21,22 @@ define([
 ], function(IPython, $, utils, CodeMirror, cm_match, cm_closeb, cm_comment) {
     // TODO: remove IPython dependency here 
     "use strict";
-
+    
+    var overlayHack = CodeMirror.scrollbarModel.native.prototype.overlayHack;
+    
+    CodeMirror.scrollbarModel.native.prototype.overlayHack = function () {
+        overlayHack.apply(this, arguments);
+        // Reverse `min-height: 18px` scrollbar hack on OS X
+        // which causes a dead area, making it impossible to click on the last line
+        // when there is horizontal scrolling to do and the "show scrollbar only when scrolling" behavior
+        // is enabled.
+        // This, in turn, has the undesirable behavior of never showing the horizontal scrollbar,
+        // even when it should, which is less problematic, at least.
+        if (/Mac/.test(navigator.platform)) {
+            this.horiz.style.minHeight = "";
+        }
+    };
+    
     var Cell = function (options) {
         /* Constructor
          *
@@ -125,11 +140,6 @@ define([
             this.element.addClass('rendered');
         } else {
             this.element.addClass('unrendered');
-        }
-        if (this.mode === 'edit') {
-            this.element.addClass('edit_mode');
-        } else {
-            this.element.addClass('command_mode');
         }
     };
 
@@ -345,8 +355,6 @@ define([
      */
     Cell.prototype.command_mode = function () {
         if (this.mode !== 'command') {
-            this.element.addClass('command_mode');
-            this.element.removeClass('edit_mode');
             this.mode = 'command';
             return true;
         } else {
@@ -361,8 +369,6 @@ define([
      */
     Cell.prototype.edit_mode = function () {
         if (this.mode !== 'edit') {
-            this.element.addClass('edit_mode');
-            this.element.removeClass('command_mode');
             this.mode = 'edit';
             return true;
         } else {
@@ -525,7 +531,15 @@ define([
         this.user_highlight = mode;
         this.auto_highlight();
     };
-
+    
+    /**
+     * Trigger autodetection of highlight scheme for current cell
+     * @method auto_highlight
+     */
+    Cell.prototype.auto_highlight = function () {
+        this._auto_highlight(this.class_config.get_sync('highlight_modes'));
+    };
+    
     /**
      * Try to autodetect cell highlight mode, or use selected mode
      * @methods _auto_highlight
@@ -664,7 +678,7 @@ define([
         var cell = this;
         
         this.element.find('.inner_cell').find("a").click(function () {
-            cell.events.trigger('unrecognized_cell.Cell', {cell: cell})
+            cell.events.trigger('unrecognized_cell.Cell', {cell: cell});
         });
     };
 

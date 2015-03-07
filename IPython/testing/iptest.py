@@ -143,7 +143,7 @@ have['casperjs'] = is_cmd_found('casperjs')
 have['phantomjs'] = is_cmd_found('phantomjs')
 have['slimerjs'] = is_cmd_found('slimerjs')
 
-min_zmq = (2,1,11)
+min_zmq = (13,)
 
 have['zmq'] = test_for('zmq.pyzmq_version_info', min_zmq, callback=lambda x: x())
 
@@ -388,7 +388,7 @@ class StreamCapturer(Thread):
             return
 
         self.stop.set()
-        os.write(self.writefd, b'wake up')  # Ensure we're not locked in a read()
+        os.write(self.writefd, b'\0')  # Ensure we're not locked in a read()
         self.join()
 
 class SubprocessStreamCapturePlugin(Plugin):

@@ -26,6 +26,10 @@ class _Bool(DOMWidget):
     description = Unicode('', help="Description of the boolean (label).", sync=True)
     disabled = Bool(False, help="Enable or disable user changes.", sync=True)
 
+    def __init__(self, value=None, **kwargs):
+        if value is not None:
+            kwargs['value'] = value
+        super(_Bool, self).__init__(**kwargs)
 
 @register('IPython.Checkbox')
 class Checkbox(_Bool):
@@ -51,10 +55,15 @@ class ToggleButton(_Bool):
            value of the toggle button: True-pressed, False-unpressed
        description : str
 	   description displayed next to the button
+       tooltip: str
+           tooltip caption of the toggle button
+       icon: str
+           font-awesome icon name
 """
     
     _view_name = Unicode('ToggleButtonView', sync=True)
     tooltip = Unicode(help="Tooltip caption of the toggle button.", sync=True)
+    icon = Unicode('', help= "Font-awesome icon.", sync=True)
 
     button_style = CaselessStrEnum(
         values=['primary', 'success', 'info', 'warning', 'danger', ''], 

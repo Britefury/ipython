@@ -33,7 +33,9 @@ define([
         // registered.
         var that = this;
         if (WidgetManager._load_callback) {
-            Promise.resolve(WidgetManager._load_callback.call(this)).then(function(state) {
+            Promise.resolve().then(function () {
+                return WidgetManager._load_callback.call(that);
+            }).then(function(state) {
                 that.set_state(state);
             }).catch(utils.reject('Error loading widget manager state', true));
         }
@@ -95,7 +97,9 @@ define([
         // Use the load callback to immediately load widget states.
         WidgetManager._managers.forEach(function(manager) {
             if (load_callback) {
-                Promise.resolve(load_callback.call(manager)).then(function(state) {
+                Promise.resolve().then(function () {
+                    return load_callback.call(manager);
+                }).then(function(state) {
                     manager.set_state(state);
                 }).catch(utils.reject('Error loading widget manager state', true));
             }
@@ -103,10 +107,18 @@ define([
     };
 
     // Use local storage to persist widgets across page refresh by default.
+    // LocalStorage is per domain, so we need to explicitly set the URL
+    // that the widgets are associated with so they don't show on other 
+    // pages hosted by the noteboook server.
+    var url = [window.location.protocol, '//', window.location.host, window.location.pathname].join('');
+    var key = 'widgets:' + url;
     WidgetManager.set_state_callbacks(function() {
-        return JSON.parse(localStorage.widgets || '{}');
+        if (localStorage[key]) {
+            return JSON.parse(localStorage[key]);
+        }
+        return {};
     }, function(state) {
-        localStorage.widgets = JSON.stringify(state);
+        localStorage[key] = JSON.stringify(state);
     });
 
     //--------------------------------------------------------------------
@@ -373,16 +385,18 @@ define([
                         };
 
                         // Get the views that are displayed *now*.
-                        model_promises.push(utils.resolve_promises_dict(model.views).then(function(model_views) {
-                            for (var id in model_views) {
-                                if (model_views.hasOwnProperty(id)) {
-                                    var view = model_views[id];
-                                    if (view.options.cell_index) {
-                                        state[model_id].views.push(view.options.cell_index);
+                        (function(local_state) {
+                            model_promises.push(utils.resolve_promises_dict(model.views).then(function(model_views) {
+                                for (var id in model_views) {
+                                    if (model_views.hasOwnProperty(id)) {
+                                        var view = model_views[id];
+                                        if (view.options.cell_index) {
+                                            local_state.views.push(view.options.cell_index);
+                                        }
                                     }
                                 }
-                            }
-                        }));
+                            }));
+                        })(state[model_id]);
                     }
                 }
             }

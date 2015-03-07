@@ -1,11 +1,6 @@
-
-body {
-    background-color:   @body-bg;
-}
-
-@media (max-width: 767px) {
+@media (max-width: @screen-xs-max) {
     // remove bootstrap-responsive's body padding on small screens
-    body.notebook_app {
+    .notebook_app {
         padding-left: 0px;
         padding-right: 0px;
     }
@@ -13,24 +8,37 @@ body {
 
 #ipython-main-app {
     .border-box-sizing();
+    height: 100%;
 }
 
 div#notebook_panel {
-    margin: 0px 0px 0px 0px;
+    margin: 0px;
     padding: 0px;
     .border-box-sizing();
+    height: 100%;
 }
-div#notebook {
+
+#notebook {
     font-size: @notebook_font_size;
     line-height: @notebook_line_height;
     overflow-y: hidden;
     overflow-x: auto;
     width: 100%;
-    /* This spaces the cell away from the edge of the notebook area */
-    padding: 2em 0 2em 0;
+    /* This spaces the page away from the edge of the notebook area */
+    padding-top: @page-header-padding;
     margin: 0px;
     outline: none;
     .border-box-sizing();
+    min-height: 100%;
+}
+
+#notebook-container{
+    @media not print{
+        padding: @page-padding;
+        background-color :  @page-color;
+        min-height: @page-min-height;
+        .box-shadow(@global-shadow);
+    }
 }
 
 div.ui-widget-content {
@@ -64,16 +72,16 @@ p {
 }
 
 .end_space {
-    height: 200px;
-}
-
-.lower-header-bar {
-    width: 100%;
-    height: 0px;
-    border-bottom: 1px solid @navbar-default-border;
-    margin-bottom: -1px;
+    min-height: 100px;
+    transition: height .2s ease;
 }
 
 .notebook_app #header {
-    .box-shadow(@notebook-shadow);
+    .box-shadow(@global-shadow);
+}
+
+.notebook_app{
+    @media not print {
+        background-color: @page-backdrop-color;
+    }
 }

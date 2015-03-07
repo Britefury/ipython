@@ -39,10 +39,7 @@ def get_ipdir():
     """Get IPython directory from command line, or assume it's the one above."""
 
     # Initialize arguments and check location
-    try:
-        ipdir = sys.argv[1]
-    except IndexError:
-        ipdir = pjoin(os.path.dirname(__file__), os.pardir)
+    ipdir = pjoin(os.path.dirname(__file__), os.pardir)
 
     ipdir = os.path.abspath(ipdir)
 
@@ -59,3 +56,10 @@ def compile_tree():
         msg = '*** ERROR: Some Python files in tree do NOT compile! ***\n'
         msg += 'See messages above for the actual file that produced it.\n'
         raise SystemExit(msg)
+
+try:
+    execfile
+except NameError:
+    def execfile(fname, globs, locs=None):
+        locs = locs or globs
+        exec(compile(open(fname).read(), fname, "exec"), globs, locs)

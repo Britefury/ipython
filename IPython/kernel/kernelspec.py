@@ -8,18 +8,19 @@ pjoin = os.path.join
 
 from IPython.utils.path import get_ipython_dir
 from IPython.utils.py3compat import PY3
-from IPython.utils.traitlets import HasTraits, List, Unicode, Dict, Any
+from IPython.utils.traitlets import HasTraits, List, Unicode, Dict, Any, Set
+from IPython.config import Configurable
 from .launcher import make_ipkernel_cmd
 
 if os.name == 'nt':
     programdata = os.environ.get('PROGRAMDATA', None)
     if programdata:
-        SYSTEM_KERNEL_DIRS = [pjoin(programdata, 'ipython', 'kernels')]
+        SYSTEM_KERNEL_DIRS = [pjoin(programdata, 'jupyter', 'kernels')]
     else:  # PROGRAMDATA is not defined by default on XP.
         SYSTEM_KERNEL_DIRS = []
 else:
-    SYSTEM_KERNEL_DIRS = ["/usr/share/ipython/kernels",
-                          "/usr/local/share/ipython/kernels",
+    SYSTEM_KERNEL_DIRS = ["/usr/share/jupyter/kernels",
+                          "/usr/local/share/jupyter/kernels",
                          ]
     
 NATIVE_KERNEL_NAME = 'python3' if PY3 else 'python2'
@@ -36,6 +37,7 @@ def _pythonfirst(s):
 class KernelSpec(HasTraits):
     argv = List()
     display_name = Unicode()
+    language = Unicode()
     env = Dict()
     resource_dir = Unicode()
     
@@ -54,6 +56,7 @@ class KernelSpec(HasTraits):
         d = dict(argv=self.argv,
                  env=self.env,
                  display_name=self.display_name,
+                 language=self.language,
                 )
 
         return d
@@ -79,7 +82,7 @@ class NoSuchKernel(KeyError):
     def __init__(self, name):
         self.name = name
 
-class KernelSpecManager(HasTraits):
+class KernelSpecManager(Configurable):
     ipython_dir = Unicode()
     def _ipython_dir_default(self):
         return get_ipython_dir()
@@ -87,24 +90,38 @@ class KernelSpecManager(HasTraits):
     user_kernel_dir = Unicode()
     def _user_kernel_dir_default(self):
         return pjoin(self.ipython_dir, 'kernels')
+
+    @property
+    def env_kernel_dir(self):
+        return pjoin(sys.prefix, 'share', 'jupyter', 'kernels')
     
+    whitelist = Set(config=True,
+        help="""Whitelist of allowed kernel names.
+        
+        By default, all installed kernels are allowed.
+        """
+    )
     kernel_dirs = List(
         help="List of kernel directories to search. Later ones take priority over earlier."    
-    )    
+    )
     def _kernel_dirs_default(self):
-        return SYSTEM_KERNEL_DIRS + [
-            self.user_kernel_dir,
-        ]
+        dirs = SYSTEM_KERNEL_DIRS[:]
+        if self.env_kernel_dir not in dirs:
+            dirs.append(self.env_kernel_dir)
+        dirs.append(self.user_kernel_dir)
+        return dirs
 
     @property
     def _native_kernel_dict(self):
         """Makes a kernel directory for the native kernel.
         
         The native kernel is the kernel using the same Python runtime as this
-        process. This will put its informatino in the user kernels directory.
+        process. This will put its information in the user kernels directory.
         """
-        return {'argv': make_ipkernel_cmd(),
-                'display_name': 'IPython (Python %d)' % (3 if PY3 else 2),
+        return {
+                'argv': make_ipkernel_cmd(),
+                'display_name': 'Python %i' % (3 if PY3 else 2),
+                'language': 'python',
                }
 
     @property
@@ -118,6 +135,9 @@ class KernelSpecManager(HasTraits):
             d.update(_list_kernels_in(kernel_dir))
 
         d[NATIVE_KERNEL_NAME] = self._native_kernel_resource_dir
+        if self.whitelist:
+            # filter if there's a whitelist
+            d = {name:spec for name,spec in d.items() if name in self.whitelist}
         return d
         # TODO: Caching?
 
@@ -126,7 +146,8 @@ class KernelSpecManager(HasTraits):
         
         Raises :exc:`NoSuchKernel` if the given kernel name is not found.
         """
-        if kernel_name in {'python', NATIVE_KERNEL_NAME}:
+        if kernel_name in {'python', NATIVE_KERNEL_NAME} and \
+            (not self.whitelist or kernel_name in self.whitelist):
             return KernelSpec(resource_dir=self._native_kernel_resource_dir,
                               **self._native_kernel_dict)
 
@@ -137,23 +158,24 @@ class KernelSpecManager(HasTraits):
             raise NoSuchKernel(kernel_name)
         return KernelSpec.from_resource_dir(resource_dir)
     
-    def _get_destination_dir(self, kernel_name, system=False):
-        if system:
+    def _get_destination_dir(self, kernel_name, user=False):
+        if user:
+            return os.path.join(self.user_kernel_dir, kernel_name)
+        else:
             if SYSTEM_KERNEL_DIRS:
                 return os.path.join(SYSTEM_KERNEL_DIRS[-1], kernel_name)
             else:
                 raise EnvironmentError("No system kernel directory is available")
-        else:
-            return os.path.join(self.user_kernel_dir, kernel_name)
 
-    def install_kernel_spec(self, source_dir, kernel_name=None, system=False,
+
+    def install_kernel_spec(self, source_dir, kernel_name=None, user=False,
                             replace=False):
         """Install a kernel spec by copying its directory.
         
         If ``kernel_name`` is not given, the basename of ``source_dir`` will
         be used.
         
-        If ``system`` is True, it will attempt to install into the systemwide
+        If ``user`` is False, it will attempt to install into the systemwide
         kernel registry. If the process does not have appropriate permissions,
         an :exc:`OSError` will be raised.
         
@@ -165,25 +187,25 @@ class KernelSpecManager(HasTraits):
             kernel_name = os.path.basename(source_dir)
         kernel_name = kernel_name.lower()
         
-        destination = self._get_destination_dir(kernel_name, system=system)
+        destination = self._get_destination_dir(kernel_name, user=user)
 
         if replace and os.path.isdir(destination):
             shutil.rmtree(destination)
 
         shutil.copytree(source_dir, destination)
 
-    def install_native_kernel_spec(self, system=False):
+    def install_native_kernel_spec(self, user=False):
         """Install the native kernel spec to the filesystem
         
         This allows a Python 3 frontend to use a Python 2 kernel, or vice versa.
         The kernelspec will be written pointing to the Python executable on
         which this is run.
         
-        If ``system`` is True, it will attempt to install into the systemwide
+        If ``user`` is False, it will attempt to install into the systemwide
         kernel registry. If the process does not have appropriate permissions, 
         an :exc:`OSError` will be raised.
         """
-        path = self._get_destination_dir(NATIVE_KERNEL_NAME, system=system)
+        path = self._get_destination_dir(NATIVE_KERNEL_NAME, user=user)
         os.makedirs(path, mode=0o755)
         with open(pjoin(path, 'kernel.json'), 'w') as f:
             json.dump(self._native_kernel_dict, f, indent=1)
@@ -203,13 +225,13 @@ def get_kernel_spec(kernel_name):
     """
     return KernelSpecManager().get_kernel_spec(kernel_name)
 
-def install_kernel_spec(source_dir, kernel_name=None, system=False, replace=False):
+def install_kernel_spec(source_dir, kernel_name=None, user=False, replace=False):
     return KernelSpecManager().install_kernel_spec(source_dir, kernel_name,
-                                                    system, replace)
+                                                    user, replace)
 
 install_kernel_spec.__doc__ = KernelSpecManager.install_kernel_spec.__doc__
 
-def install_native_kernel_spec(self, system=False):
-    return KernelSpecManager().install_native_kernel_spec(system=system)
+def install_native_kernel_spec(user=False):
+    return KernelSpecManager().install_native_kernel_spec(user=user)
 
 install_native_kernel_spec.__doc__ = KernelSpecManager.install_native_kernel_spec.__doc__

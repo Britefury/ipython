@@ -19,10 +19,9 @@ except ImportError:
 from jinja2 import TemplateNotFound
 from tornado import web
 
-try:
-    from tornado.log import app_log
-except ImportError:
-    app_log = logging.getLogger()
+from tornado import gen
+from tornado.log import app_log
+
 
 import IPython
 from IPython.utils.sysinfo import get_sys_info
@@ -139,6 +138,10 @@ class IPythonHandler(AuthenticatedHandler):
         return self.settings.get('base_url', '/')
 
     @property
+    def default_url(self):
+        return self.settings.get('default_url', '')
+
+    @property
     def ws_url(self):
         return self.settings.get('websocket_url', '')
 
@@ -239,6 +242,7 @@ class IPythonHandler(AuthenticatedHandler):
     def template_namespace(self):
         return dict(
             base_url=self.base_url,
+            default_url=self.default_url,
             ws_url=self.ws_url,
             logged_in=self.logged_in,
             login_available=self.login_available,
@@ -355,9 +359,10 @@ def json_errors(method):
        the error in a human readable form.
     """
     @functools.wraps(method)
+    @gen.coroutine
     def wrapper(self, *args, **kwargs):
         try:
-            result = method(self, *args, **kwargs)
+            result = yield gen.maybe_future(method(self, *args, **kwargs))
         except web.HTTPError as e:
             status = e.status_code
             message = e.log_message
@@ -375,7 +380,8 @@ def json_errors(method):
             reply = dict(message=message, reason=None, traceback=tb_text)
             self.finish(json.dumps(reply))
         else:
-            return result
+            # FIXME: can use regular return in generators in py3
+            raise gen.Return(result)
     return wrapper
 
 
@@ -398,7 +404,7 @@ class FileFindHandler(web.StaticFileHandler):
         # disable browser caching, rely on 304 replies for savings
         if "v" not in self.request.arguments or \
                 any(self.request.path.startswith(path) for path in self.no_cache_paths):
-            self.add_header("Cache-Control", "no-cache")
+            self.set_header("Cache-Control", "no-cache")
     
     def initialize(self, path, default_filename=None, no_cache_paths=None):
         self.no_cache_paths = no_cache_paths or []
@@ -463,7 +469,13 @@ class TrailingSlashHandler(web.RequestHandler):
 
 class FilesRedirectHandler(IPythonHandler):
     """Handler for redirecting relative URLs to the /files/ handler"""
-    def get(self, path=''):
+    
+    @staticmethod
+    def redirect_to_files(self, path):
+        """make redirect logic a reusable static method
+        
+        so it can be called from other handlers.
+        """
         cm = self.contents_manager
         if cm.dir_exists(path):
             # it's a *directory*, redirect to /tree
@@ -487,6 +499,9 @@ class FilesRedirectHandler(IPythonHandler):
         url = url_escape(url)
         self.log.debug("Redirecting %s to %s", self.request.path, url)
         self.redirect(url)
+    
+    def get(self, path=''):
+        return self.redirect_to_files(self, path)
 
 
 #-----------------------------------------------------------------------------
@@ -495,7 +510,6 @@ class FilesRedirectHandler(IPythonHandler):
 
 # path matches any number of `/foo[/bar...]` or just `/` or ''
 path_regex = r"(?P<path>(?:(?:/[^/]+)+|/?))"
-notebook_path_regex = r"(?P<path>(?:/[^/]+)+\.ipynb)"
 
 #-----------------------------------------------------------------------------
 # URL to handler mappings

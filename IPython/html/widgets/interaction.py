@@ -1,16 +1,7 @@
 """Interact with functions using widgets."""
 
-#-----------------------------------------------------------------------------
-# Copyright (c) 2013, the IPython Development Team.
-#
+# Copyright (c) IPython Development Team.
 # Distributed under the terms of the Modified BSD License.
-#
-# The full license is in the file COPYING.txt, distributed with this software.
-#-----------------------------------------------------------------------------
-
-#-----------------------------------------------------------------------------
-# Imports
-#-----------------------------------------------------------------------------
 
 from __future__ import print_function
 
@@ -29,10 +20,6 @@ from IPython.utils.py3compat import string_types, unicode_type
 from IPython.utils.traitlets import HasTraits, Any, Unicode
 
 empty = Parameter.empty
-
-#-----------------------------------------------------------------------------
-# Classes and Functions
-#-----------------------------------------------------------------------------
 
 
 def _matches(o, pattern):
@@ -72,7 +59,7 @@ def _widget_abbrev_single_value(o):
     if isinstance(o, string_types):
         return Text(value=unicode_type(o))
     elif isinstance(o, dict):
-        return Dropdown(values=o)
+        return Dropdown(options=o)
     elif isinstance(o, bool):
         return Checkbox(value=o)
     elif isinstance(o, float):
@@ -89,7 +76,7 @@ def _widget_abbrev(o):
     float_or_int = (float, int)
     if isinstance(o, (list, tuple)):
         if o and all(isinstance(x, string_types) for x in o):
-            return Dropdown(values=[unicode_type(k) for k in o])
+            return Dropdown(options=[unicode_type(k) for k in o])
         elif _matches(o, (float_or_int, float_or_int)):
             min, max, value = _get_min_max_value(o[0], o[1])
             if all(isinstance(_, int) for _ in o):
@@ -168,16 +155,33 @@ def _widgets_from_abbreviations(seq):
         widget = _widget_from_abbrev(abbrev, default)
         if not widget.description:
             widget.description = name
+        widget._kwarg = name
         result.append(widget)
     return result
 
 def interactive(__interact_f, **kwargs):
-    """Build a group of widgets to interact with a function."""
+    """
+    Builds a group of interactive widgets tied to a function and places the
+    group into a Box container.
+
+    Returns
+    -------
+    container : a Box instance containing multiple widgets
+
+    Parameters
+    ----------
+    __interact_f : function
+        The function to which the interactive widgets are tied. The `**kwargs`
+        should match the function signature.
+    **kwargs : various, optional
+        An interactive widget is created for each keyword argument that is a
+        valid widget abbreviation.
+    """
     f = __interact_f
     co = kwargs.pop('clear_output', True)
     manual = kwargs.pop('__manual', False)
     kwargs_widgets = []
-    container = Box()
+    container = Box(_dom_classes=['widget-interact'])
     container.result = None
     container.args = []
     container.kwargs = dict()
@@ -207,7 +211,7 @@ def interactive(__interact_f, **kwargs):
         container.kwargs = {}
         for widget in kwargs_widgets:
             value = widget.value
-            container.kwargs[widget.description] = value
+            container.kwargs[widget._kwarg] = value
         if co:
             clear_output(wait=True)
         if manual:
@@ -227,7 +231,7 @@ def interactive(__interact_f, **kwargs):
     # Wire up the widgets
     # If we are doing manual running, the callback is only triggered by the button
     # Otherwise, it is triggered for every trait change received
-    # On-demand running also suppresses running the fucntion with the initial parameters
+    # On-demand running also suppresses running the function with the initial parameters
     if manual:
         manual_button.on_click(call_f)
     else:
@@ -239,31 +243,87 @@ def interactive(__interact_f, **kwargs):
     return container
 
 def interact(__interact_f=None, **kwargs):
-    """interact(f, **kwargs)
+    """
+    Displays interactive widgets which are tied to a function.
+    Expects the first argument to be a function. Parameters to this function are
+    widget abbreviations passed in as keyword arguments (`**kwargs`). Can be used
+    as a decorator (see examples).
 
-    Interact with a function using widgets."""
+    Returns
+    -------
+    f : __interact_f with interactive widget attached to it.
+
+    Parameters
+    ----------
+    __interact_f : function
+        The function to which the interactive widgets are tied. The `**kwargs`
+        should match the function signature. Passed to :func:`interactive()`
+    **kwargs : various, optional
+        An interactive widget is created for each keyword argument that is a
+        valid widget abbreviation. Passed to :func:`interactive()`
+
+    Examples
+    --------
+    Render an interactive text field that shows the greeting with the passed in
+    text::
+
+       # 1. Using interact as a function
+       def greeting(text="World"):
+           print "Hello {}".format(text)
+       interact(greeting, text="IPython Widgets")
+        
+       # 2. Using interact as a decorator
+       @interact
+       def greeting(text="World"):
+           print "Hello {}".format(text)
+        
+       # 3. Using interact as a decorator with named parameters
+       @interact(text="IPython Widgets")
+       def greeting(text="World"):
+           print "Hello {}".format(text)
+        
+    Render an interactive slider widget and prints square of number::
+
+       # 1. Using interact as a function
+       def square(num=1):
+           print "{} squared is {}".format(num, num*num)
+       interact(square, num=5)
+
+       # 2. Using interact as a decorator
+       @interact
+       def square(num=2):
+           print "{} squared is {}".format(num, num*num)
+        
+       # 3. Using interact as a decorator with named parameters
+       @interact(num=5)
+       def square(num=2):
+           print "{} squared is {}".format(num, num*num)
+    """
     # positional arg support in: https://gist.github.com/8851331
     if __interact_f is not None:
-        # This branch handles the cases:
+        # This branch handles the cases 1 and 2
         # 1. interact(f, **kwargs)
         # 2. @interact
         #    def f(*args, **kwargs):
         #        ...
         f = __interact_f
         w = interactive(f, **kwargs)
-        f.widget = w
+        try:
+            f.widget = w
+        except AttributeError:
+            # some things (instancemethods) can't have attributes attached,
+            # so wrap in a lambda
+            f = lambda *args, **kwargs: __interact_f(*args, **kwargs)
+            f.widget = w
         display(w)
         return f
     else:
-        # This branch handles the case:
+        # This branch handles the case 3
         # @interact(a=30, b=40)
         # def f(*args, **kwargs):
         #     ...
         def dec(f):
-            w = interactive(f, **kwargs)
-            f.widget = w
-            display(w)
-            return f
+            return interact(f, **kwargs)
         return dec
 
 def interact_manual(__interact_f=None, **kwargs):

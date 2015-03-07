@@ -8,6 +8,7 @@ define(["widgets/js/manager",
         "base/js/utils",
         "base/js/namespace",
 ], function(widgetmanager, _, Backbone, $, utils, IPython){
+    "use strict";
 
     var WidgetModel = Backbone.Model.extend({
         constructor: function (widget_manager, model_id, comm) {
@@ -47,6 +48,17 @@ define(["widgets/js/manager",
             } else {
                 this.set_comm_live(false);
             }
+
+            // Listen for the events that lead to the websocket being terminated.
+            var that = this;
+            var died = function() {
+                that.set_comm_live(false);
+            };
+            widget_manager.notebook.events.on('kernel_disconnected.Kernel', died);
+            widget_manager.notebook.events.on('kernel_killed.Kernel', died);
+            widget_manager.notebook.events.on('kernel_restarting.Kernel', died);
+            widget_manager.notebook.events.on('kernel_dead.Kernel', died);
+
             return Backbone.Model.apply(this);
         },
 
@@ -143,8 +155,9 @@ define(["widgets/js/manager",
                     this.trigger('msg:custom', msg.content.data.content);
                     break;
                 case 'display':
-                    this.widget_manager.display_view(msg, this)
-                        .catch(utils.reject('Could not process display view msg', true));
+                    this.state_change = this.state_change.then(function() {
+                        that.widget_manager.display_view(msg, that);
+                    }).catch(utils.reject('Could not process display view msg', true));
                     break;
             }
         },
@@ -164,7 +177,7 @@ define(["widgets/js/manager",
 
         get_state: function() {
             // Get the serializable state of the model.
-            state = this.toJSON();
+            var state = this.toJSON();
             for (var key in state) {
                 if (state.hasOwnProperty(key)) {
                     state[key] = this._pack_models(state[key]);
@@ -384,6 +397,15 @@ define(["widgets/js/manager",
              * Public constructor.
              */
             this.model.on('change',this.update,this);
+
+            // Bubble the comm live events.
+            this.model.on('comm:live', function() {
+                this.trigger('comm:live', this);
+            }, this);
+            this.model.on('comm:dead', function() {
+                this.trigger('comm:dead', this);
+            }, this);
+
             this.options = parameters.options;
             this.on('displayed', function() { 
                 this.is_displayed = true; 
@@ -522,11 +544,11 @@ define(["widgets/js/manager",
                 this.update_attr('border-style', this.model.get('border_style'));
                 this.update_attr('font-style', this.model.get('font_style'));
                 this.update_attr('font-weight', this.model.get('font_weight'));
-                this.update_attr('font-size', this.model.get('font_size'));
+                this.update_attr('font-size', this._default_px(this.model.get('font_size')));
                 this.update_attr('font-family', this.model.get('font_family'));
                 this.update_attr('padding', this.model.get('padding'));
-                this.update_attr('margin', this.model.get('margin'));
-                this.update_attr('border-radius', this.model.get('border_radius'));
+                this.update_attr('margin', this._default_px(this.model.get('margin')));
+                this.update_attr('border-radius', this._default_px(this.model.get('border_radius')));
 
                 this.update_css(this.model, this.model.get("_css"));
             }, this);
@@ -567,7 +589,6 @@ define(["widgets/js/manager",
             /**
              * Update the css styling of this view.
              */
-            var e = this.$el;
             if (css === undefined) {return;}
             for (var i = 0; i < css.length; i++) {
                 // Apply the css traits to all elements that match the selector.
@@ -685,7 +706,7 @@ define(["widgets/js/manager",
              */
             var remove = remove_view || this._remove_view;
             var create = create_view || this._create_view;
-            var context = context || this._handler_context;
+            context = context || this._handler_context;
             var i = 0;
             // first, skip past the beginning of the lists if they are identical
             for (; i < new_models.length; i++) {

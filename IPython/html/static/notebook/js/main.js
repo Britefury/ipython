@@ -60,6 +60,10 @@ require([
         notebook_name : utils.get_body_data('notebookName')
     };
 
+    var config_section = new configmod.ConfigSection('notebook', common_options);
+    config_section.load();
+    var common_config = new configmod.ConfigSection('common', common_options);
+    common_config.load();
     var page = new page.Page();
     var pager = new pager.Pager('div#pager', {
         events: events});
@@ -71,11 +75,10 @@ require([
     var save_widget = new savewidget.SaveWidget('span#save_widget', {
         events: events, 
         keyboard_manager: keyboard_manager});
-    var contents = new contents.Contents($.extend({
-        events: events},
-        common_options));
-    var config_section = new configmod.ConfigSection('notebook', common_options);
-    config_section.load();
+    var contents = new contents.Contents({
+          base_url: common_options.base_url,
+          common_config: common_config
+        });
     var notebook = new notebook.Notebook('div#notebook', $.extend({
         events: events,
         keyboard_manager: keyboard_manager,
@@ -109,7 +112,7 @@ require([
         keyboard_manager: keyboard_manager});
     notification_area.init_notification_widgets();
     var kernel_selector = new kernelselector.KernelSelector(
-        '#kernel_selector_widget', notebook);
+        '#kernel_logo_widget', notebook);
 
     $('body').append('<div id="fonttest"><pre><span id="test1">x</span>'+
                      '<span id="test2" style="font-weight: bold;">x</span>'+
@@ -150,13 +153,8 @@ require([
     IPython.tooltip = notebook.tooltip;
 
     events.trigger('app_initialized.NotebookApp');
-    config_section.loaded.then(function() {
-        if (config_section.data.load_extensions) {
-            var nbextension_paths = Object.getOwnPropertyNames(
-                                        config_section.data.load_extensions);
-            IPython.load_extensions.apply(this, nbextension_paths);
-        }
-    });
+    utils.load_extensions_from_config(config_section);
+    utils.load_extensions_from_config(common_config);
     notebook.load_notebook(common_options.notebook_path);
 
 });

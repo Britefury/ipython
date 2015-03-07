@@ -2,6 +2,7 @@
 """Test the contents webservice API."""
 
 import base64
+from contextlib import contextmanager
 import io
 import json
 import os
@@ -12,7 +13,10 @@ pjoin = os.path.join
 
 import requests
 
-from IPython.html.utils import url_path_join, url_escape
+from ..filecheckpoints import GenericFileCheckpoints
+
+from IPython.config import Config
+from IPython.html.utils import url_path_join, url_escape, to_os_path
 from IPython.html.tests.launchnotebook import NotebookTestBase, assert_http_error
 from IPython.nbformat import read, write, from_dict
 from IPython.nbformat.v4 import (
@@ -21,6 +25,7 @@ from IPython.nbformat.v4 import (
 from IPython.nbformat import v2
 from IPython.utils import py3compat
 from IPython.utils.data import uniq_stable
+from IPython.utils.tempdir import TemporaryDirectory
 
 
 def notebooks_only(dir_model):
@@ -46,12 +51,14 @@ class API(object):
     def list(self, path='/'):
         return self._req('GET', path)
 
-    def read(self, path, type=None, format=None):
+    def read(self, path, type=None, format=None, content=None):
         params = {}
         if type is not None:
             params['type'] = type
         if format is not None:
             params['format'] = format
+        if content == False:
+            params['content'] = '0'
         return self._req('GET', path, params=params)
 
     def create_untitled(self, path='/', ext='.ipynb'):
@@ -72,9 +79,6 @@ class API(object):
 
     def upload(self, path, body):
         return self._req('PUT', path, body)
-
-    def mkdir_untitled(self, path='/'):
-        return self._req('POST', path, json.dumps({'type': 'directory'}))
 
     def mkdir(self, path='/'):
         return self._req('PUT', path, json.dumps({'type': 'directory'}))
@@ -122,8 +126,8 @@ class APITest(NotebookTestBase):
                ]
     hidden_dirs = ['.hidden', '__pycache__']
 
-    dirs = uniq_stable([py3compat.cast_unicode(d) for (d,n) in dirs_nbs])
-    del dirs[0]  # remove ''
+    # Don't include root dir.
+    dirs = uniq_stable([py3compat.cast_unicode(d) for (d,n) in dirs_nbs[1:]])
     top_level_dirs = {normalize('NFC', d.split('/')[0]) for d in dirs}
 
     @staticmethod
@@ -133,44 +137,77 @@ class APITest(NotebookTestBase):
     @staticmethod
     def _txt_for_name(name):
         return u'%s text file' % name
+    
+    def to_os_path(self, api_path):
+        return to_os_path(api_path, root=self.notebook_dir.name)
+    
+    def make_dir(self, api_path):
+        """Create a directory at api_path"""
+        os_path = self.to_os_path(api_path)
+        try:
+            os.makedirs(os_path)
+        except OSError:
+            print("Directory already exists: %r" % os_path)
 
+    def make_txt(self, api_path, txt):
+        """Make a text file at a given api_path"""
+        os_path = self.to_os_path(api_path)
+        with io.open(os_path, 'w', encoding='utf-8') as f:
+            f.write(txt)
+    
+    def make_blob(self, api_path, blob):
+        """Make a binary file at a given api_path"""
+        os_path = self.to_os_path(api_path)
+        with io.open(os_path, 'wb') as f:
+            f.write(blob)
+    
+    def make_nb(self, api_path, nb):
+        """Make a notebook file at a given api_path"""
+        os_path = self.to_os_path(api_path)
+        
+        with io.open(os_path, 'w', encoding='utf-8') as f:
+            write(nb, f, version=4)
+
+    def delete_dir(self, api_path):
+        """Delete a directory at api_path, removing any contents."""
+        os_path = self.to_os_path(api_path)
+        shutil.rmtree(os_path, ignore_errors=True)
+
+    def delete_file(self, api_path):
+        """Delete a file at the given path if it exists."""
+        if self.isfile(api_path):
+            os.unlink(self.to_os_path(api_path))
+    
+    def isfile(self, api_path):
+        return os.path.isfile(self.to_os_path(api_path))
+    
+    def isdir(self, api_path):
+        return os.path.isdir(self.to_os_path(api_path))
+    
     def setUp(self):
-        nbdir = self.notebook_dir.name
-        self.blob = os.urandom(100)
-        self.b64_blob = base64.encodestring(self.blob).decode('ascii')
 
         for d in (self.dirs + self.hidden_dirs):
-            d.replace('/', os.sep)
-            if not os.path.isdir(pjoin(nbdir, d)):
-                os.mkdir(pjoin(nbdir, d))
+            self.make_dir(d)
 
         for d, name in self.dirs_nbs:
-            d = d.replace('/', os.sep)
             # create a notebook
-            with io.open(pjoin(nbdir, d, '%s.ipynb' % name), 'w',
-                         encoding='utf-8') as f:
-                nb = new_notebook()
-                write(nb, f, version=4)
-
+            nb = new_notebook()
+            self.make_nb(u'{}/{}.ipynb'.format(d, name), nb)
+            
             # create a text file
-            with io.open(pjoin(nbdir, d, '%s.txt' % name), 'w',
-                         encoding='utf-8') as f:
-                f.write(self._txt_for_name(name))
-
+            txt = self._txt_for_name(name)
+            self.make_txt(u'{}/{}.txt'.format(d, name), txt)
+            
             # create a binary file
-            with io.open(pjoin(nbdir, d, '%s.blob' % name), 'wb') as f:
-                f.write(self._blob_for_name(name))
+            blob = self._blob_for_name(name)
+            self.make_blob(u'{}/{}.blob'.format(d, name), blob)
 
         self.api = API(self.base_url())
 
     def tearDown(self):
-        nbdir = self.notebook_dir.name
-
         for dname in (list(self.top_level_dirs) + self.hidden_dirs):
-            shutil.rmtree(pjoin(nbdir, dname), ignore_errors=True)
-
-        if os.path.isfile(pjoin(nbdir, 'inroot.ipynb')):
-            os.unlink(pjoin(nbdir, 'inroot.ipynb'))
+            self.delete_dir(dname)
+        self.delete_file('inroot.ipynb')
 
     def test_list_notebooks(self):
         nbs = notebooks_only(self.api.list().json())
@@ -204,12 +241,17 @@ class APITest(NotebookTestBase):
         self.assertEqual(nbnames, expected)
 
     def test_list_dirs(self):
-        print(self.api.list().json())
         dirs = dirs_only(self.api.list().json())
         dir_names = {normalize('NFC', d['name']) for d in dirs}
-        print(dir_names)
-        print(self.top_level_dirs)
         self.assertEqual(dir_names, self.top_level_dirs)  # Excluding hidden dirs
+
+    def test_get_dir_no_content(self):
+        for d in self.dirs:
+            model = self.api.read(d, content=False).json()
+            self.assertEqual(model['path'], d)
+            self.assertEqual(model['type'], 'directory')
+            self.assertIn('content', model)
+            self.assertEqual(model['content'], None)
 
     def test_list_nonexistant_dir(self):
         with assert_http_error(404):
@@ -224,9 +266,18 @@ class APITest(NotebookTestBase):
             self.assertEqual(nb['type'], 'notebook')
             self.assertIn('content', nb)
             self.assertEqual(nb['format'], 'json')
-            self.assertIn('content', nb)
             self.assertIn('metadata', nb['content'])
             self.assertIsInstance(nb['content']['metadata'], dict)
+
+    def test_get_nb_no_content(self):
+        for d, name in self.dirs_nbs:
+            path = url_path_join(d, name + '.ipynb')
+            nb = self.api.read(path, content=False).json()
+            self.assertEqual(nb['name'], u'%s.ipynb' % name)
+            self.assertEqual(nb['path'], path)
+            self.assertEqual(nb['type'], 'notebook')
+            self.assertIn('content', nb)
+            self.assertEqual(nb['content'], None)
 
     def test_get_contents_no_such_file(self):
         # Name that doesn't exist - should be a 404
@@ -261,8 +312,10 @@ class APITest(NotebookTestBase):
             self.assertIn('content', model)
             self.assertEqual(model['format'], 'base64')
             self.assertEqual(model['type'], 'file')
-            b64_data = base64.encodestring(self._blob_for_name(name)).decode('ascii')
-            self.assertEqual(model['content'], b64_data)
+            self.assertEqual(
+                base64.decodestring(model['content'].encode('ascii')),
+                self._blob_for_name(name),
+            )
 
         # Name that doesn't exist - should be a 404
         with assert_http_error(404):
@@ -283,11 +336,8 @@ class APITest(NotebookTestBase):
         self.assertEqual(rjson['name'], path.rsplit('/', 1)[-1])
         self.assertEqual(rjson['path'], path)
         self.assertEqual(rjson['type'], type)
-        isright = os.path.isdir if type == 'directory' else os.path.isfile
-        assert isright(pjoin(
-            self.notebook_dir.name,
-            path.replace('/', os.sep),
-        ))
+        isright = self.isdir if type == 'directory' else self.isfile
+        assert isright(path)
 
     def test_create_untitled(self):
         resp = self.api.create_untitled(path=u'å b')
@@ -451,7 +501,7 @@ class APITest(NotebookTestBase):
         self.assertEqual(resp.headers['Location'].split('/')[-1], 'z.ipynb')
         self.assertEqual(resp.json()['name'], 'z.ipynb')
         self.assertEqual(resp.json()['path'], 'foo/z.ipynb')
-        assert os.path.isfile(pjoin(self.notebook_dir.name, 'foo', 'z.ipynb'))
+        assert self.isfile('foo/z.ipynb')
 
         nbs = notebooks_only(self.api.list('foo').json())
         nbnames = set(n['name'] for n in nbs)
@@ -471,16 +521,10 @@ class APITest(NotebookTestBase):
         nbmodel= {'content': nb, 'type': 'notebook'}
         resp = self.api.save('foo/a.ipynb', body=json.dumps(nbmodel))
 
-        nbfile = pjoin(self.notebook_dir.name, 'foo', 'a.ipynb')
-        with io.open(nbfile, 'r', encoding='utf-8') as f:
-            newnb = read(f, as_version=4)
-        self.assertEqual(newnb.cells[0].source,
-                         u'Created by test ³')
         nbcontent = self.api.read('foo/a.ipynb').json()['content']
         newnb = from_dict(nbcontent)
         self.assertEqual(newnb.cells[0].source,
                          u'Created by test ³')
-
 
     def test_checkpoints(self):
         resp = self.api.read('foo/a.ipynb')
@@ -519,3 +563,93 @@ class APITest(NotebookTestBase):
         self.assertEqual(r.status_code, 204)
         cps = self.api.get_checkpoints('foo/a.ipynb').json()
         self.assertEqual(cps, [])
+
+    def test_file_checkpoints(self):
+        """
+        Test checkpointing of non-notebook files.
+        """
+        filename = 'foo/a.txt'
+        resp = self.api.read(filename)
+        orig_content = json.loads(resp.text)['content']
+
+        # Create a checkpoint.
+        r = self.api.new_checkpoint(filename)
+        self.assertEqual(r.status_code, 201)
+        cp1 = r.json()
+        self.assertEqual(set(cp1), {'id', 'last_modified'})
+        self.assertEqual(r.headers['Location'].split('/')[-1], cp1['id'])
+
+        # Modify the file and save.
+        new_content = orig_content + '\nsecond line'
+        model = {
+            'content': new_content,
+            'type': 'file',
+            'format': 'text',
+        }
+        resp = self.api.save(filename, body=json.dumps(model))
+
+        # List checkpoints
+        cps = self.api.get_checkpoints(filename).json()
+        self.assertEqual(cps, [cp1])
+
+        content = self.api.read(filename).json()['content']
+        self.assertEqual(content, new_content)
+
+        # Restore cp1
+        r = self.api.restore_checkpoint(filename, cp1['id'])
+        self.assertEqual(r.status_code, 204)
+        restored_content = self.api.read(filename).json()['content']
+        self.assertEqual(restored_content, orig_content)
+
+        # Delete cp1
+        r = self.api.delete_checkpoint(filename, cp1['id'])
+        self.assertEqual(r.status_code, 204)
+        cps = self.api.get_checkpoints(filename).json()
+        self.assertEqual(cps, [])
+
+    @contextmanager
+    def patch_cp_root(self, dirname):
+        """
+        Temporarily patch the root dir of our checkpoint manager.
+        """
+        cpm = self.notebook.contents_manager.checkpoints
+        old_dirname = cpm.root_dir
+        cpm.root_dir = dirname
+        try:
+            yield
+        finally:
+            cpm.root_dir = old_dirname
+
+    def test_checkpoints_separate_root(self):
+        """
+        Test that FileCheckpoints functions correctly even when it's
+        using a different root dir from FileContentsManager.  This also keeps
+        the implementation honest for use with ContentsManagers that don't map
+        models to the filesystem
+
+        Override this method to a no-op when testing other managers.
+        """
+        with TemporaryDirectory() as td:
+            with self.patch_cp_root(td):
+                self.test_checkpoints()
+
+        with TemporaryDirectory() as td:
+            with self.patch_cp_root(td):
+                self.test_file_checkpoints()
+
+
+class GenericFileCheckpointsAPITest(APITest):
+    """
+    Run the tests from APITest with GenericFileCheckpoints.
+    """
+    config = Config()
+    config.FileContentsManager.checkpoints_class = GenericFileCheckpoints
+
+    def test_config_did_something(self):
+
+        self.assertIsInstance(
+            self.notebook.contents_manager.checkpoints,
+            GenericFileCheckpoints,
+        )
+
+

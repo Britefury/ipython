@@ -21,13 +21,12 @@ import signal
 import socket
 import sys
 import threading
-import time
 import webbrowser
 
 
-# check for pyzmq 2.1.11
+# check for pyzmq
 from IPython.utils.zmqrelated import check_for_zmq
-check_for_zmq('2.1.11', 'IPython.html')
+check_for_zmq('13', 'IPython.html')
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -60,12 +59,15 @@ from IPython.html import (
 from .base.handlers import Template404
 from .log import log_request
 from .services.kernels.kernelmanager import MappingKernelManager
+from .services.config import ConfigManager
 from .services.contents.manager import ContentsManager
 from .services.contents.filemanager import FileContentsManager
 from .services.clusters.clustermanager import ClusterManager
 from .services.sessions.sessionmanager import SessionManager
 
-from .base.handlers import AuthenticatedFileHandler, FileFindHandler
+from .auth.login import LoginHandler
+from .auth.logout import LogoutHandler
+from .base.handlers import IPythonHandler, FileFindHandler
 
 from IPython.config import Config
 from IPython.config.application import catch_config_error, boolean_flag
@@ -75,19 +77,20 @@ from IPython.core.application import (
 from IPython.core.profiledir import ProfileDir
 from IPython.kernel import KernelManager
 from IPython.kernel.kernelspec import KernelSpecManager
-from IPython.kernel.zmq.session import default_secure, Session
+from IPython.kernel.zmq.session import Session
 from IPython.nbformat.sign import NotebookNotary
 from IPython.utils.importstring import import_item
 from IPython.utils import submodule
 from IPython.utils.process import check_pid
 from IPython.utils.traitlets import (
     Dict, Unicode, Integer, List, Bool, Bytes, Instance,
-    DottedObjectName, TraitError,
+    TraitError, Type,
 )
 from IPython.utils import py3compat
 from IPython.utils.path import filefind, get_ipython_dir
 from IPython.utils.sysinfo import get_sys_info
 
+from .nbextensions import SYSTEM_NBEXTENSIONS_DIRS
 from .utils import url_path_join
 
 #-----------------------------------------------------------------------------
@@ -240,7 +243,7 @@ class NotebookWebApplication(web.Application):
         # set the URL that will be redirected from `/`
         handlers.append(
             (r'/?', web.RedirectHandler, {
-                'url' : url_path_join(settings['base_url'], settings['default_url']),
+                'url' : settings['default_url'],
                 'permanent': False, # want 302, not 301
             })
         )
@@ -342,6 +345,7 @@ class NotebookApp(BaseIPythonApplication):
     classes = [
         KernelManager, ProfileDir, Session, MappingKernelManager,
         ContentsManager, FileContentsManager, NotebookNotary,
+        KernelSpecManager,
     ]
     flags = Dict(flags)
     aliases = Dict(aliases)
@@ -406,6 +410,20 @@ class NotebookApp(BaseIPythonApplication):
     ip = Unicode('localhost', config=True,
         help="The IP address the notebook server will listen on."
     )
+    def _ip_default(self):
+        """Return localhost if available, 127.0.0.1 otherwise.
+        
+        On some (horribly broken) systems, localhost cannot be bound.
+        """
+        s = socket.socket()
+        try:
+            s.bind(('localhost', 0))
+        except socket.error as e:
+            self.log.warn("Cannot bind to localhost, using 127.0.0.1 as default ip\n%s", e)
+            return '127.0.0.1'
+        else:
+            s.close()
+            return 'localhost'
 
     def _ip_changed(self, name, old, new):
         if new == u'*': self.ip = u''
@@ -501,7 +519,11 @@ class NotebookApp(BaseIPythonApplication):
     tornado_settings = Dict(config=True,
             help="Supply overrides for the tornado.web.Application that the "
                  "IPython notebook uses.")
-
+    
+    ssl_options = Dict(config=True,
+            help="""Supply SSL options for the tornado HTTPServer.
+            See the tornado docs for details.""")
+    
     jinja_environment_options = Dict(config=True, 
             help="Supply extra arguments that will be passed to Jinja environment.")
     
@@ -564,11 +586,14 @@ class NotebookApp(BaseIPythonApplication):
         """return extra paths + the default locations"""
         return self.extra_template_paths + DEFAULT_TEMPLATE_PATH_LIST
 
-    nbextensions_path = List(Unicode, config=True,
-        help="""paths for Javascript extensions. By default, this is just IPYTHONDIR/nbextensions"""
+    extra_nbextensions_path = List(Unicode, config=True,
+        help="""extra paths to look for Javascript notebook extensions"""
     )
-    def _nbextensions_path_default(self):
-        return [os.path.join(get_ipython_dir(), 'nbextensions')]
+    
+    @property
+    def nbextensions_path(self):
+        """The path to look for Javascript notebook extensions"""
+        return self.extra_nbextensions_path + [os.path.join(get_ipython_dir(), 'nbextensions')] + SYSTEM_NBEXTENSIONS_DIRS
 
     websocket_url = Unicode("", config=True,
         help="""The base URL for websockets,
@@ -614,50 +639,61 @@ class NotebookApp(BaseIPythonApplication):
         else:
             self.log.info("Using MathJax: %s", new)
 
-    contents_manager_class = DottedObjectName('IPython.html.services.contents.filemanager.FileContentsManager',
+    contents_manager_class = Type(
+        default_value=FileContentsManager,
+        klass=ContentsManager,
         config=True,
         help='The notebook manager class to use.'
     )
-    kernel_manager_class = DottedObjectName('IPython.html.services.kernels.kernelmanager.MappingKernelManager',
+    kernel_manager_class = Type(
+        default_value=MappingKernelManager,
         config=True,
         help='The kernel manager class to use.'
     )
-    session_manager_class = DottedObjectName('IPython.html.services.sessions.sessionmanager.SessionManager',
+    session_manager_class = Type(
+        default_value=SessionManager,
         config=True,
         help='The session manager class to use.'
     )
-    cluster_manager_class = DottedObjectName('IPython.html.services.clusters.clustermanager.ClusterManager',
+    cluster_manager_class = Type(
+        default_value=ClusterManager,
         config=True,
         help='The cluster manager class to use.'
     )
 
-    config_manager_class = DottedObjectName('IPython.html.services.config.manager.ConfigManager',
+    config_manager_class = Type(
+        default_value=ConfigManager,
         config = True,
         help='The config manager class to use'
     )
 
     kernel_spec_manager = Instance(KernelSpecManager)
 
-    def _kernel_spec_manager_default(self):
-        return KernelSpecManager(ipython_dir=self.ipython_dir)
-
-    kernel_spec_manager_class = DottedObjectName('IPython.kernel.kernelspec.KernelSpecManager',
-            config=True,
-            help="""
-            The kernel spec manager class to use. Should be a subclass
-            of `IPython.kernel.kernelspec.KernelSpecManager`.
-
-            The Api of KernelSpecManager is provisional and might change
-            without warning between this version of IPython and the next stable one.
-            """)
-
-    login_handler = DottedObjectName('IPython.html.auth.login.LoginHandler',
+    kernel_spec_manager_class = Type(
+        default_value=KernelSpecManager,
         config=True,
-        help='The login handler class to use.')
+        help="""
+        The kernel spec manager class to use. Should be a subclass
+        of `IPython.kernel.kernelspec.KernelSpecManager`.
 
-    logout_handler = DottedObjectName('IPython.html.auth.logout.LogoutHandler',
+        The Api of KernelSpecManager is provisional and might change
+        without warning between this version of IPython and the next stable one.
+        """
+    )
+
+    login_handler_class = Type(
+        default_value=LoginHandler,
+        klass=web.RequestHandler,
         config=True,
-        help='The logout handler class to use.')
+        help='The login handler class to use.',
+    )
+
+    logout_handler_class = Type(
+        default_value=LogoutHandler,
+        klass=web.RequestHandler,
+        config=True,
+        help='The logout handler class to use.',
+    )
 
     trust_xheaders = Bool(False, config=True,
         help=("Whether to trust or not X-Scheme/X-Forwarded-Proto and X-Real-Ip/X-Forwarded-For headers"
@@ -715,6 +751,12 @@ class NotebookApp(BaseIPythonApplication):
               "This is an experimental API, and may change in future releases.")
     )
 
+    reraise_server_extension_failures = Bool(
+        False,
+        config=True,
+        help="Reraise exceptions encountered loading server extensions?",
+    )
+
     def parse_command_line(self, argv=None):
         super(NotebookApp, self).parse_command_line(argv)
         
@@ -742,31 +784,36 @@ class NotebookApp(BaseIPythonApplication):
         self.ipython_kernel_argv = ["--profile-dir", self.profile_dir.location]
 
     def init_configurables(self):
-        # force Session default to be secure
-        default_secure(self.config)
-        kls = import_item(self.kernel_spec_manager_class)
-        self.kernel_spec_manager = kls(ipython_dir=self.ipython_dir)
-
-        kls = import_item(self.kernel_manager_class)
-        self.kernel_manager = kls(
-            parent=self, log=self.log, ipython_kernel_argv=self.ipython_kernel_argv,
-            connection_dir = self.profile_dir.security_dir,
+        self.kernel_spec_manager = self.kernel_spec_manager_class(
+            parent=self,
+            ipython_dir=self.ipython_dir,
         )
-        kls = import_item(self.contents_manager_class)
-        self.contents_manager = kls(parent=self, log=self.log)
-        kls = import_item(self.session_manager_class)
-        self.session_manager = kls(parent=self, log=self.log,
-                                   kernel_manager=self.kernel_manager,
-                                   contents_manager=self.contents_manager)
-        kls = import_item(self.cluster_manager_class)
-        self.cluster_manager = kls(parent=self, log=self.log)
-        self.cluster_manager.update_profiles()
-        self.login_handler_class = import_item(self.login_handler)
-        self.logout_handler_class = import_item(self.logout_handler)
+        self.kernel_manager = self.kernel_manager_class(
+            parent=self,
+            log=self.log,
+            ipython_kernel_argv=self.ipython_kernel_argv,
+            connection_dir=self.profile_dir.security_dir,
+        )
+        self.contents_manager = self.contents_manager_class(
+            parent=self,
+            log=self.log,
+        )
+        self.session_manager = self.session_manager_class(
+            parent=self,
+            log=self.log,
+            kernel_manager=self.kernel_manager,
+            contents_manager=self.contents_manager,
+        )
+        self.cluster_manager = self.cluster_manager_class(
+            parent=self,
+            log=self.log,
+        )
 
-        kls = import_item(self.config_manager_class)
-        self.config_manager = kls(parent=self, log=self.log,
-                                  profile_dir=self.profile_dir.location)
+        self.config_manager = self.config_manager_class(
+            parent=self,
+            log=self.log,
+            profile_dir=self.profile_dir.location,
+        )
 
     def init_logging(self):
         # This prevents double log messages because tornado use a root logger that
@@ -789,6 +836,9 @@ class NotebookApp(BaseIPythonApplication):
         if self.allow_origin_pat:
             self.tornado_settings['allow_origin_pat'] = re.compile(self.allow_origin_pat)
         self.tornado_settings['allow_credentials'] = self.allow_credentials
+        # ensure default_url starts with base_url
+        if not self.default_url.startswith(self.base_url):
+            self.default_url = url_path_join(self.base_url, self.default_url)
         
         self.web_app = NotebookWebApplication(
             self, self.kernel_manager, self.contents_manager,
@@ -797,11 +847,13 @@ class NotebookApp(BaseIPythonApplication):
             self.log, self.base_url, self.default_url, self.tornado_settings,
             self.jinja_environment_options
         )
+        ssl_options = self.ssl_options
         if self.certfile:
-            ssl_options = dict(certfile=self.certfile)
-            if self.keyfile:
-                ssl_options['keyfile'] = self.keyfile
-        else:
+            ssl_options['certfile'] = self.certfile
+        if self.keyfile:
+            ssl_options['keyfile'] = self.keyfile
+        if not ssl_options:
+            # None indicates no SSL config
             ssl_options = None
         self.login_handler_class.validate_security(self, ssl_options=ssl_options)
         self.http_server = httpserver.HTTPServer(self.web_app, ssl_options=ssl_options,
@@ -849,7 +901,8 @@ class NotebookApp(BaseIPythonApplication):
             initialize(self.web_app)
             self.web_app.settings['terminals_available'] = True
         except ImportError as e:
-            self.log.info("Terminals not available (error was %s)", e)
+            log = self.log.debug if sys.platform == 'win32' else self.log.warn
+            log("Terminals not available (error was %s)", e)
 
     def init_signal(self):
         if not sys.platform.startswith('win'):
@@ -937,6 +990,8 @@ class NotebookApp(BaseIPythonApplication):
                 if func is not None:
                     func(self)
             except Exception:
+                if self.reraise_server_extension_failures:
+                    raise
                 self.log.warn("Error loading server extension %s", modulename,
                               exc_info=True)
     
@@ -1031,6 +1086,11 @@ class NotebookApp(BaseIPythonApplication):
                 threading.Thread(target=b).start()
         
         self.io_loop = ioloop.IOLoop.current()
+        if sys.platform.startswith('win'):
+            # add no-op to wake every 5s
+            # to handle signals that may be ignored by the inner loop
+            pc = ioloop.PeriodicCallback(lambda : None, 5000)
+            pc.start()
         try:
             self.io_loop.start()
         except KeyboardInterrupt:

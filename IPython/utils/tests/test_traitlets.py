@@ -972,6 +972,19 @@ class TestList(TraitTestBase):
 class Foo(object):
     pass
 
+class NoneInstanceListTrait(HasTraits):
+    
+    value = List(Instance(Foo, allow_none=False))
+
+class TestNoneInstanceList(TraitTestBase):
+
+    obj = NoneInstanceListTrait()
+
+    _default_value = []
+    _good_values = [[Foo(), Foo()], []]
+    _bad_values = [[None], [Foo(), None]]
+
+
 class InstanceListTrait(HasTraits):
 
     value = List(Instance(__name__+'.Foo'))
@@ -987,6 +1000,19 @@ class TestInstanceList(TraitTestBase):
     _default_value = []
     _good_values = [[Foo(), Foo(), None], None]
     _bad_values = [['1', 2,], '1', [Foo]]
+
+class UnionListTrait(HasTraits):
+
+    value = List(Int() | Bool())
+
+class TestUnionListTrait(HasTraits):
+
+    obj = UnionListTrait()
+
+    _default_value = []
+    _good_values = [[True, 1], [False, True]]
+    _bad_values = [[1, 'True'], False]
+
 
 class LenListTrait(HasTraits):
 
@@ -1088,6 +1114,13 @@ def test_dict_assignment():
     nt.assert_equal(d, c.value)
     nt.assert_true(c.value is d)
 
+def test_dict_default_value():
+    """Check that the `{}` default value of the Dict traitlet constructor is
+    actually copied."""
+
+    d1, d2 = Dict(), Dict()
+    nt.assert_false(d1.get_default_value() is d2.get_default_value())
+
 class TestLink(TestCase):
     def test_connect_same(self):
         """Verify two traitlets of the same type can be linked together using link."""
@@ -1187,6 +1220,25 @@ class TestLink(TestCase):
         a.value = 4
         self.assertEqual(''.join(callback_count), 'ab')
         del callback_count[:]
+    
+    def test_validate_args(self):
+        class A(HasTraits):
+            value = Int()
+        class B(HasTraits):
+            count = Int()
+        a = A(value=9)
+        b = B(count=8)
+        b.value = 5
+        
+        with self.assertRaises(TypeError):
+            link((a, 'value'))
+        with self.assertRaises(TypeError):
+            link((a, 'value', 'count'), (b, 'count'))
+        with self.assertRaises(TypeError):
+            link((a, 'value'), (b, 'value'))
+        with self.assertRaises(TypeError):
+            link((a, 'traits'), (b, 'count'))
+
 
 class TestDirectionalLink(TestCase):
     def test_connect_same(self):
@@ -1252,6 +1304,25 @@ class TestDirectionalLink(TestCase):
         # Change one of the values to make sure they don't stay in sync.
         a.value = 5
         self.assertNotEqual(a.value, b.value)
+
+    def test_validate_args(self):
+        class A(HasTraits):
+            value = Int()
+        class B(HasTraits):
+            count = Int()
+        a = A(value=9)
+        b = B(count=8)
+        b.value = 5
+        
+        with self.assertRaises(TypeError):
+            directional_link((a, 'value'))
+        with self.assertRaises(TypeError):
+            directional_link((a, 'value', 'count'), (b, 'count'))
+        with self.assertRaises(TypeError):
+            directional_link((a, 'value'), (b, 'value'))
+        with self.assertRaises(TypeError):
+            directional_link((a, 'traits'), (b, 'count'))
+
 
 class Pickleable(HasTraits):
     i = Int()

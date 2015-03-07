@@ -109,11 +109,11 @@ def _pygments_highlight(source, output_formatter, language='ipython', metadata=N
     from pygments import highlight
     from pygments.lexers import get_lexer_by_name
     from pygments.util import ClassNotFound
-    from IPython.nbconvert.utils.lexers import IPythonLexer, IPython3Lexer
+    from IPython.lib.lexers import IPythonLexer, IPython3Lexer
 
     # If the cell uses a magic extension language,
     # use the magic language instead.
-    if language == 'ipython' \
+    if language.startswith('ipython') \
         and metadata \
         and 'magics_language' in metadata:
 

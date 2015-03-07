@@ -49,7 +49,24 @@ define([
                 type: 'notebook',
             }, item);
         }
-        $('#running_list_header').toggle($.isEmptyObject(d));
+        $('#running_list_placeholder').toggle($.isEmptyObject(d));
+    };
+
+    KernelList.prototype.add_link = function (model, item) {
+        notebooklist.NotebookList.prototype.add_link.apply(this, [model, item])
+
+        var running_indicator = item.find(".item_buttons")
+            .text('');
+
+        var that = this;
+        var shutdown_button = $('<button/>')
+            .addClass('btn btn-warning btn-xs')
+            .text('Shutdown')
+            .click(function() {
+                var path = $(this).parent().parent().parent().data('path');
+                that.shutdown_notebook(path);
+            })
+            .appendTo(running_indicator);
     };
     
     // Backwards compatability.

@@ -8,11 +8,12 @@
 {{super()}}
 {% endblock %}
 
-{% block params %}
+{% block bodyclasses %}edit_app {{super()}}{% endblock %}
 
+{% block params %}
 data-base-url="{{base_url}}"
 data-file-path="{{file_path}}"
-
+{{super()}}
 {% endblock %}
 
 {% block headercontainer %}
@@ -30,6 +31,9 @@ data-file-path="{{file_path}}"
   <div id="menubar">
     <div id="menus" class="navbar navbar-default" role="navigation">
       <div class="container-fluid">
+          <p  class="navbar-text indicator_area">
+          <span id="current-mode" >current mode</span>
+          </p>
         <button type="button" class="btn btn-default navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
           <i class="fa fa-bars"></i>
           <span class="navbar-text">Menu</span>
@@ -44,6 +48,7 @@ data-file-path="{{file_path}}"
                 <li id="new-file"><a href="#">New</a></li>
                 <li id="save-file"><a href="#">Save</a></li>
                 <li id="rename-file"><a href="#">Rename</a></li>
+                <li id="download-file"><a href="#">Download</a></li>
               </ul>
             </li>
             <li class="dropdown"><a href="#" class="dropdown-toggle" data-toggle="dropdown">Edit</a>
@@ -68,19 +73,21 @@ data-file-path="{{file_path}}"
               </ul>
             </li>
           </ul>
-          <p id="current-mode" class="navbar-text navbar-right">current mode</p>
         </div>
       </div>
     </div>
   </div>
 </div>
 
+<div class="lower-header-bar"></div>
+
 {% endblock %}
 
 {% block site %}
 
-
+<div id="texteditor-backdrop">
 <div id="texteditor-container" class="container"></div>
+</div>
 
 {% endblock %}
 

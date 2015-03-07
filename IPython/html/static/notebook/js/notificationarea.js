@@ -14,7 +14,7 @@ define([
         this.save_widget = options.save_widget;
         this.notebook = options.notebook;
         this.keyboard_manager = options.keyboard_manager;
-    }
+    };
     
     NotebookNotificationArea.prototype = Object.create(NotificationArea.prototype);
     
@@ -37,23 +37,39 @@ define([
         var that = this;
         var knw = this.new_notification_widget('kernel');
         var $kernel_ind_icon = $("#kernel_indicator_icon");
-        var $modal_ind_icon = $("#modal_indicator_icon");
+        var $modal_ind_icon = $("#modal_indicator");
+        var $readonly_ind_icon = $('#readonly-indicator');
+        var $body = $('body');
+
+        // Listen for the notebook loaded event.  Set readonly indicator.
+        this.events.on('notebook_loaded.Notebook', function() {
+            if (that.notebook.writable) {
+                $readonly_ind_icon.hide();
+            } else {
+                $readonly_ind_icon.show();
+            }
+        });
 
         // Command/Edit mode
         this.events.on('edit_mode.Notebook', function () {
             that.save_widget.update_document_title();
-            $modal_ind_icon.attr('class','edit_mode_icon').attr('title','Edit Mode');
+            $body.addClass('edit_mode');
+            $body.removeClass('command_mode');
+            $modal_ind_icon.attr('title','Edit Mode');
         });
 
         this.events.on('command_mode.Notebook', function () {
             that.save_widget.update_document_title();
-            $modal_ind_icon.attr('class','command_mode_icon').attr('title','Command Mode');
+            $body.removeClass('edit_mode');
+            $body.addClass('command_mode');
+            $modal_ind_icon.attr('title','Command Mode');
         });
 
         // Implicitly start off in Command mode, switching to Edit mode will trigger event
-        $modal_ind_icon.attr('class','command_mode_icon').attr('title','Command Mode');
+        $modal_ind_icon.addClass('modal_indicator').attr('title','Command Mode');
+        $body.addClass('command_mode');
 
-        // Kernel events 
+        // Kernel events
 
         // this can be either kernel_created.Kernel or kernel_created.Session
         this.events.on('kernel_created.Kernel kernel_created.Session', function () {
@@ -99,7 +115,7 @@ define([
                         }
                     }
                 });
-            };
+            }
 
             that.save_widget.update_document_title();
             knw.danger("Dead kernel");
@@ -142,8 +158,8 @@ define([
 
         this.events.on('kernel_killed.Kernel kernel_killed.Session', function () {
             that.save_widget.update_document_title();
-            knw.danger("Dead kernel");
-            $kernel_ind_icon.attr('class','kernel_dead_icon').attr('title','Kernel Dead');
+            knw.warning("No kernel");
+            $kernel_ind_icon.attr('class','kernel_busy_icon').attr('title','Kernel is not running');
         });
 
         this.events.on('kernel_dead.Kernel', function () {
@@ -180,6 +196,10 @@ define([
             $kernel_ind_icon.attr('class','kernel_dead_icon').attr('title','Kernel Dead');
 
             showMsg();
+        });
+        
+        this.events.on("no_kernel.Kernel", function (evt, data) {
+            $("#kernel_indicator").find('.kernel_indicator_name').text("No Kernel");
         });
 
         this.events.on('kernel_dead.Session', function (evt, info) {
@@ -224,7 +244,7 @@ define([
             knw.danger(short, undefined, showMsg);
         });
 
-        this.events.on('kernel_starting.Kernel', function () {
+        this.events.on('kernel_starting.Kernel kernel_created.Session', function () {
             window.document.title='(Starting) '+window.document.title;
             $kernel_ind_icon.attr('class','kernel_busy_icon').attr('title','Kernel Busy');
             knw.set_message("Kernel starting, please wait...");
@@ -245,6 +265,13 @@ define([
             window.document.title='(Busy) '+window.document.title;
             $kernel_ind_icon.attr('class','kernel_busy_icon').attr('title','Kernel Busy');
         });
+
+        this.events.on('spec_match_found.Kernel', function (evt, data) {
+            that.widget('kernelspec').info("Using kernel: " + data.found.spec.display_name, 3000, undefined, {
+                title: "Only candidate for language: " + data.selected.language + " was " + data.found.spec.display_name
+            });
+        });
+
         
         // Start the kernel indicator in the busy state, and send a kernel_info request.
         // When the kernel_info reply arrives, the kernel is idle.

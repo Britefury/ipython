@@ -6,6 +6,7 @@
 .modal.fade .modal-dialog {
   -webkit-transform: translate(0, 0);
   -ms-transform: translate(0, 0);
+  -o-transform: translate(0, 0);
   transform: translate(0, 0);
 }
 code {
@@ -18,13 +19,15 @@ pre {
 label {
   font-weight: normal;
 }
+/* Make the page background atleast 100% the height of the view port */
+/* Make the page itself atleast 70% the height of the view port */
 .border-box-sizing {
   box-sizing: border-box;
   -moz-box-sizing: border-box;
   -webkit-box-sizing: border-box;
 }
 .corner-all {
-  border-radius: 4px;
+  border-radius: 2px;
 }
 .no-padding {
   padding: 0px;
@@ -349,14 +352,14 @@ div.cell {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  border-radius: 4px;
+  border-radius: 2px;
   box-sizing: border-box;
   -moz-box-sizing: border-box;
   -webkit-box-sizing: border-box;
   border-width: thin;
   border-style: solid;
   width: 100%;
-  padding: 5px 5px 5px 0px;
+  padding: 5px;
   /* This acts as a spacer between cells, that is outside the border */
   margin: 0px;
   outline: none;
@@ -370,18 +373,18 @@ div.cell.selected {
     border-color: transparent;
   }
 }
-div.cell.edit_mode {
+.edit_mode div.cell.selected {
   border-color: green;
   /* Don't border the cells when printing */
 }
 @media print {
-  div.cell.edit_mode {
+  .edit_mode div.cell.selected {
     border-color: transparent;
   }
 }
-div.prompt {
+.prompt {
   /* This needs to be wide enough for 3 digit prompt numbers: In[100]: */
-  min-width: 15ex;
+  min-width: 14ex;
   /* This padding is tuned to match the padding on the CodeMirror editor. */
   padding: 0.4em;
   margin: 0px;
@@ -390,8 +393,8 @@ div.prompt {
   /* This has to match that of the the CodeMirror class line-height below */
   line-height: 1.21429em;
 }
-@media (max-width: 480px) {
-  div.prompt {
+@media (max-width: 540px) {
+  .prompt {
     text-align: left;
   }
 }
@@ -417,10 +420,15 @@ div.inner_cell {
   /* Modern browsers */
   flex: 1;
 }
+@-moz-document url-prefix() {
+  div.inner_cell {
+    overflow-x: hidden;
+  }
+}
 /* input_area and input_prompt must match in top border and margin for alignment */
 div.input_area {
   border: 1px solid #cfcfcf;
-  border-radius: 4px;
+  border-radius: 2px;
   background: #f7f7f7;
   line-height: 1.21429em;
 }
@@ -449,7 +457,7 @@ div.unrecognized_cell {
   align-items: stretch;
 }
 div.unrecognized_cell .inner_cell {
-  border-radius: 4px;
+  border-radius: 2px;
   padding: 5px;
   font-weight: bold;
   color: red;
@@ -464,7 +472,7 @@ div.unrecognized_cell .inner_cell a:hover {
   color: inherit;
   text-decoration: none;
 }
-@media (max-width: 480px) {
+@media (max-width: 540px) {
   div.unrecognized_cell > div.prompt {
     display: none;
   }
@@ -495,7 +503,7 @@ div.input {
   flex-direction: row;
   align-items: stretch;
 }
-@media (max-width: 480px) {
+@media (max-width: 540px) {
   div.input {
     /* Old browsers */
     display: -webkit-box;
@@ -543,6 +551,7 @@ div.input_area > div.highlight > pre {
 .CodeMirror {
   line-height: 1.21429em;
   /* Changed from 1em to our global default */
+  font-size: 14px;
   height: auto;
   /* Changed to auto to autogrow */
   background: none;
@@ -563,8 +572,8 @@ div.input_area > div.highlight > pre {
   padding: 0 8px 0 4px;
 }
 .CodeMirror-gutters {
-  border-bottom-left-radius: 4px;
-  border-top-left-radius: 4px;
+  border-bottom-left-radius: 2px;
+  border-top-left-radius: 2px;
 }
 .CodeMirror pre {
   /* In CM3 this went to 4px from 0 in CM2. We need the 0 value because of how we size */
@@ -572,10 +581,6 @@ div.input_area > div.highlight > pre {
   padding: 0;
   border: 0;
   border-radius: 0;
-}
-.CodeMirror-vscrollbar,
-.CodeMirror-hscrollbar {
-  display: none !important;
 }
 /*
 
@@ -750,7 +755,7 @@ div.output_scroll {
   /* FF needs this *and the wrapper* to specify full width, or it will shrinkwrap */
   width: 100%;
   overflow: auto;
-  border-radius: 4px;
+  border-radius: 2px;
   -webkit-box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.8);
   box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.8);
   display: block;
@@ -778,7 +783,7 @@ div.out_prompt_overlay {
   height: 100%;
   padding: 0px 0.4em;
   position: absolute;
-  border-radius: 4px;
+  border-radius: 2px;
 }
 div.out_prompt_overlay:hover {
   /* use inner shadow to get border that is computed the same on WebKit/FF */
@@ -837,7 +842,7 @@ div.output_area .rendered_html img {
   flex-direction: column;
   align-items: stretch;
 }
-@media (max-width: 480px) {
+@media (max-width: 540px) {
   div.output_area {
     /* Old browsers */
     display: -webkit-box;
@@ -867,7 +872,7 @@ div.output_area pre {
 /* This class is for the output subarea inside the output_area and after
    the prompt div. */
 div.output_subarea {
-  padding: 0.4em 0.4em 0em 0.4em;
+  padding: 0.4em;
   /* Old browsers */
   -webkit-box-flex: 1;
   -moz-box-flex: 1;
@@ -1096,7 +1101,7 @@ div.output_unrecognized a:hover {
   margin-top: 1em;
 }
 .rendered_html p {
-  text-align: justify;
+  text-align: left;
 }
 .rendered_html * + p {
   margin-top: 1em;
@@ -1110,7 +1115,6 @@ div.output_unrecognized a:hover {
   margin-top: 1em;
 }
 div.text_cell {
-  padding: 5px 5px 5px 0px;
   /* Old browsers */
   display: -webkit-box;
   -webkit-box-orient: horizontal;
@@ -1126,7 +1130,7 @@ div.text_cell {
   flex-direction: row;
   align-items: stretch;
 }
-@media (max-width: 480px) {
+@media (max-width: 540px) {
   div.text_cell > div.prompt {
     display: none;
   }
@@ -1190,6 +1194,10 @@ h6:hover .anchor-link {
 .cm-header-6 {
   font-size: 100%;
   font-style: italic;
+}
+.widget-interact > div,
+.widget-interact > input {
+  padding: 2.5px;
 }
 .widget-area {
   /*
@@ -1255,13 +1263,21 @@ h6:hover .anchor-link {
   /* Modern browsers */
   align-items: flex-start;
 }
+.widget-area.connection-problems .prompt:after {
+  content: "\f127";
+  font-family: 'FontAwesome';
+  color: #d9534f;
+  font-size: 14px;
+  top: 3px;
+  padding: 3px;
+}
 /* THE CLASSES BELOW CAN APPEAR ANYWHERE IN THE DOM (POSSIBLEY OUTSIDE OF
    THE WIDGET AREA). */
 .slide-track {
   /* Slider Track */
   border: 1px solid #CCCCCC;
   background: #FFFFFF;
-  border-radius: 4px;
+  border-radius: 2px;
   /* Round the corners of the slide track */
 }
 .widget-hslider {
@@ -1287,7 +1303,7 @@ h6:hover .anchor-link {
   /* Fix the padding of the slide track so the ui-slider is sized 
     correctly. */
   padding-left: 8px;
-  padding-right: 5px;
+  padding-right: 2px;
   overflow: visible;
   /* Default size of the slider */
   width: 350px;
@@ -1299,7 +1315,7 @@ h6:hover .anchor-link {
   /* Slider Track */
   border: 1px solid #CCCCCC;
   background: #FFFFFF;
-  border-radius: 4px;
+  border-radius: 2px;
   /* Round the corners of the slide track */
   /* Make the div a flex box (makes FF behave correctly). */
   /* Old browsers */
@@ -1319,8 +1335,8 @@ h6:hover .anchor-link {
 }
 .widget-hslider .ui-slider {
   /* Inner, invisible slide div */
-  border: 0px !important;
-  background: none !important;
+  border: 0px;
+  background: none;
   /* Old browsers */
   display: -webkit-box;
   -webkit-box-orient: horizontal;
@@ -1343,19 +1359,21 @@ h6:hover .anchor-link {
   flex: 1;
 }
 .widget-hslider .ui-slider .ui-slider-handle {
-  width: 14px !important;
-  height: 28px !important;
-  margin-top: -8px !important;
+  width: 12px;
+  height: 28px;
+  margin-top: -8px;
+  border-radius: 2px;
 }
 .widget-hslider .ui-slider .ui-slider-range {
-  height: 12px !important;
-  margin-top: -4px !important;
+  height: 12px;
+  margin-top: -4px;
+  background: #eeeeee;
 }
 .widget-vslider {
   /* Vertical jQuery Slider */
   /* Fix the padding of the slide track so the ui-slider is sized 
     correctly. */
-  padding-bottom: 8px;
+  padding-bottom: 5px;
   overflow: visible;
   /* Default size of the slider */
   width: 5px;
@@ -1366,7 +1384,7 @@ h6:hover .anchor-link {
   /* Slider Track */
   border: 1px solid #CCCCCC;
   background: #FFFFFF;
-  border-radius: 4px;
+  border-radius: 2px;
   /* Round the corners of the slide track */
   /* Make the div a flex box (makes FF behave correctly). */
   /* Old browsers */
@@ -1386,8 +1404,8 @@ h6:hover .anchor-link {
 }
 .widget-vslider .ui-slider {
   /* Inner, invisible slide div */
-  border: 0px !important;
-  background: none !important;
+  border: 0px;
+  background: none;
   margin-left: -4px;
   margin-top: 5px;
   /* Old browsers */
@@ -1412,13 +1430,15 @@ h6:hover .anchor-link {
   flex: 1;
 }
 .widget-vslider .ui-slider .ui-slider-handle {
-  width: 28px !important;
-  height: 14px !important;
+  width: 28px;
+  height: 12px;
   margin-left: -9px;
+  border-radius: 2px;
 }
 .widget-vslider .ui-slider .ui-slider-range {
-  width: 12px !important;
-  margin-left: -1px !important;
+  width: 12px;
+  margin-left: -1px;
+  background: #eeeeee;
 }
 .widget-text {
   /* String Textbox - used for TextBoxView and TextAreaView */
@@ -1438,7 +1458,7 @@ h6:hover .anchor-link {
 .widget-progress {
   /* Progress Bar */
   margin-top: 6px;
-  width: 350px;
+  min-width: 350px;
 }
 .widget-progress .progress-bar {
   /* Disable progress bar animation */
@@ -1450,6 +1470,7 @@ h6:hover .anchor-link {
 }
 .widget-combo-btn {
   /* ComboBox Main Button */
+  /* Subtract 25px to account for the drop arrow button */
   min-width: 125px;
 }
 .widget_item .dropdown-menu li a {
@@ -1519,18 +1540,6 @@ h6:hover .anchor-link {
   text-align: center;
   vertical-align: text-top;
 }
-.widget-modal {
-  /* Box - ModalView */
-  overflow: hidden;
-  position: absolute !important;
-  top: 0px;
-  left: 0px;
-  margin-left: 0px !important;
-}
-.widget-modal-body {
-  /* Box - ModalView Body */
-  max-height: none !important;
-}
 .widget-box {
   /* Box */
   box-sizing: border-box;
@@ -1566,13 +1575,6 @@ h6:hover .anchor-link {
 }
 .widget-radio-box label {
   margin-top: 0px;
-}
-.docked-widget-modal {
-  /* Horizontal Label */
-  overflow: hidden;
-  position: relative !important;
-  top: 0px !important;
-  left: 0px !important;
-  margin-left: 0px !important;
+  margin-left: 20px;
 }
 /*# sourceMappingURL=ipython.min.css.map */

@@ -49,7 +49,7 @@ define([
         
         //  File
         this.element.find('#new-file').click(function () {
-            var w = window.open();
+            var w = window.open(undefined, IPython._target);
             // Create a new file in the current directory
             var parent = utils.url_path_split(editor.file_path)[0];
             editor.contents.new_untitled(parent, {type: "file"}).then(
@@ -73,6 +73,11 @@ define([
         });
         this.element.find('#rename-file').click(function () {
             that.save_widget.rename();
+        });
+        this.element.find('#download-file').click(function () {
+            window.open(utils.url_join_encode(
+                that.base_url, 'files', that.editor.file_path
+            ) + '?download=1');
         });
         
         // Edit

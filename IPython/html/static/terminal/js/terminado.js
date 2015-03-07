@@ -1,10 +1,12 @@
 define ([], function() {
+    "use strict";
     function make_terminal(element, size, ws_url) {
         var ws = new WebSocket(ws_url);
+        Terminal.brokenBold = true;
         var term = new Terminal({
           cols: size.cols,
           rows: size.rows,
-          screenKeys: true,
+          screenKeys: false,
           useStyle: false
         });
         ws.onopen = function(event) {
@@ -21,7 +23,7 @@ define ([], function() {
             term.open(element);
             
             ws.onmessage = function(event) {
-                json_msg = JSON.parse(event.data);
+                var json_msg = JSON.parse(event.data);
                 switch(json_msg[0]) {
                     case "stdout":
                         term.write(json_msg[1]);

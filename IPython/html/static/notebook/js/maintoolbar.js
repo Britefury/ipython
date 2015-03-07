@@ -25,6 +25,7 @@ define([
         this.events = options.events;
         this.notebook = options.notebook;
         this._make();
+        this.notebook.keyboard_manager.register_events(this.element);
         Object.seal(this);
     };
 
@@ -100,6 +101,7 @@ define([
             default:
                 console.log("unrecognized cell type:", cell_type);
             }
+            that.notebook.focus_cell();
         });
         return sel;
 
@@ -122,6 +124,7 @@ define([
                     celltoolbar.CellToolbar.activate_preset(val, that.events);
                     that.notebook.metadata.celltoolbar = val;
                 }
+                that.notebook.focus_cell();
             });
         // Setup the currently registered presets.
         var presets = celltoolbar.CellToolbar.list_presets();
@@ -134,10 +137,19 @@ define([
             var name = data.name;
             select.append($('<option/>').attr('value', name).text(name));
         });
+        this.events.on('unregistered_preset.CellToolbar', function (event, data) {
+            if (select.val() === data.name){
+                select.val('');
+                celltoolbar.CellToolbar.global_hide();
+                delete that.notebook.metadata.celltoolbar;
+            }
+            select.find("option[value='"+name+"']" ).remove();
+        });
         // Update select value when a preset is activated.
         this.events.on('preset_activated.CellToolbar', function (event, data) {
-            if (select.val() !== data.name)
+            if (select.val() !== data.name){
                 select.val(data.name);
+            }
         });
 
         var wrapper = $('<div/>').addClass('btn-group');

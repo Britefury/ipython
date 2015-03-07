@@ -172,13 +172,24 @@ def getmembers(object, predicate=None):
     results.sort()
     return results
 
+def _validate_link(*tuples):
+    """Validate arguments for traitlet link functions"""
+    for t in tuples:
+        if not len(t) == 2:
+            raise TypeError("Each linked traitlet must be specified as (HasTraits, 'trait_name'), not %r" % t)
+        obj, trait_name = t
+        if not isinstance(obj, HasTraits):
+            raise TypeError("Each object must be HasTraits, not %r" % type(obj))
+        if not trait_name in obj.traits():
+            raise TypeError("%r has no trait %r" % (obj, trait_name))
+
 @skip_doctest
 class link(object):
     """Link traits from different objects together so they remain in sync.
 
     Parameters
     ----------
-    obj : pairs of objects/attributes
+    *args : pairs of objects/attributes
 
     Examples
     --------
@@ -190,6 +201,7 @@ class link(object):
     def __init__(self, *args):
         if len(args) < 2:
             raise TypeError('At least two traitlets must be provided.')
+        _validate_link(*args)
 
         self.objects = {}
 
@@ -245,6 +257,9 @@ class directional_link(object):
     updating = False
 
     def __init__(self, source, *targets):
+        if len(targets) < 1:
+            raise TypeError('At least two traitlets must be provided.')
+        _validate_link(source, *targets)
         self.source = source
         self.targets = targets
 
@@ -276,9 +291,7 @@ class directional_link(object):
         self.source = None
         self.targets = []
 
-def dlink(source, *targets):
-    """Shorter helper function returning a directional_link object"""
-    return directional_link(source, *targets)
+dlink = directional_link
 
 #-----------------------------------------------------------------------------
 # Base TraitType for all traits
@@ -1058,18 +1071,23 @@ class Union(TraitType):
         self.default_value = self.trait_types[0].get_default_value()
         super(Union, self).__init__(**metadata)
 
-    def instance_init(self, obj):
+    def _resolve_classes(self):
         for trait_type in self.trait_types:
             trait_type.name = self.name
             trait_type.this_class = self.this_class
             if hasattr(trait_type, '_resolve_classes'):
                 trait_type._resolve_classes()
+
+    def instance_init(self, obj):
+        self._resolve_classes()
         super(Union, self).instance_init(obj)
 
     def validate(self, obj, value):
         for trait_type in self.trait_types:
             try:
-                return trait_type._validate(obj, value)
+                v = trait_type._validate(obj, value)
+                self._metadata = trait_type._metadata
+                return v
             except TraitError:
                 continue
         self.error(obj, value)
@@ -1446,8 +1464,8 @@ class Container(Instance):
     def instance_init(self, obj):
         if isinstance(self._trait, TraitType):
             self._trait.this_class = self.this_class
-        if hasattr(self._trait, 'instance_init'):
-            self._trait.instance_init(obj)
+        if hasattr(self._trait, '_resolve_classes'):
+            self._trait._resolve_classes()
         super(Container, self).instance_init(obj)
 
 
@@ -1616,18 +1634,26 @@ class Tuple(Container):
                 validated.append(v)
         return tuple(validated)
 
+    def instance_init(self, obj):
+        for trait in self._traits:
+            if isinstance(trait, TraitType):
+                trait.this_class = self.this_class
+            if hasattr(trait, '_resolve_classes'):
+                trait._resolve_classes()
+        super(Container, self).instance_init(obj)
+
 
 class Dict(Instance):
     """An instance of a Python dict."""
 
-    def __init__(self, default_value=None, allow_none=True, **metadata):
+    def __init__(self, default_value={}, allow_none=True, **metadata):
         """Create a dict trait type from a dict.
 
         The default value is created by doing ``dict(default_value)``,
         which creates a copy of the ``default_value``.
         """
         if default_value is None:
-            args = ((),)
+            args = None
         elif isinstance(default_value, dict):
             args = (default_value,)
         elif isinstance(default_value, SequenceTypes):
@@ -1642,15 +1668,15 @@ class Dict(Instance):
 class EventfulDict(Instance):
     """An instance of an EventfulDict."""
 
-    def __init__(self, default_value=None, allow_none=True, **metadata):
+    def __init__(self, default_value={}, allow_none=True, **metadata):
         """Create a EventfulDict trait type from a dict.
 
-        The default value is created by doing 
-        ``eventful.EvenfulDict(default_value)``, which creates a copy of the 
+        The default value is created by doing
+        ``eventful.EvenfulDict(default_value)``, which creates a copy of the
         ``default_value``.
         """
         if default_value is None:
-            args = ((),)
+            args = None
         elif isinstance(default_value, dict):
             args = (default_value,)
         elif isinstance(default_value, SequenceTypes):

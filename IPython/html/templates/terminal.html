@@ -2,6 +2,8 @@
 
 {% block title %}{{page_title}}{% endblock %}
 
+{% block bodyclasses %}terminal-app {{super()}}{% endblock %}
+
 {% block params %}
 
 data-base-url="{{base_url}}"
@@ -9,10 +11,15 @@ data-ws-path="{{ws_path}}"
 
 {% endblock %}
 
+{% block stylesheet %}
+{{super()}}
+
+<link rel="stylesheet" href="{{ static_url("terminal/css/override.css") }}" type="text/css" />
+{% endblock %}
 
 {% block site %}
 
-<div id="terminado-container"></div>
+<div id="terminado-container" class="container"></div>
 
 {% endblock %}
 

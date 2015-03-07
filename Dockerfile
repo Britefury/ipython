@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y -q \
     npm
 
 # In order to build from source, need less
-RUN npm install -g less@1.7.5
+RUN npm install -g 'less@<3.0'
 
 RUN pip install invoke
 
@@ -57,8 +57,8 @@ RUN pip2 install file:///srv/ipython#egg=ipython[all]
 RUN pip3 install file:///srv/ipython#egg=ipython[all]
 
 # install kernels
-RUN python2 -m IPython kernelspec install-self --system
-RUN python3 -m IPython kernelspec install-self --system
+RUN python2 -m IPython kernelspec install-self
+RUN python3 -m IPython kernelspec install-self
 
 WORKDIR /tmp/
 

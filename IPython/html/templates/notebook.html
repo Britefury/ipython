@@ -21,6 +21,8 @@ window.mathjax_url = "{{mathjax_url}}";
 
 {% endblock %}
 
+{% block bodyclasses %}notebook_app {{super()}}{% endblock %}
+
 {% block params %}
 
 data-project="{{project}}"
@@ -28,7 +30,6 @@ data-base-url="{{base_url}}"
 data-ws-url="{{ws_url}}"
 data-notebook-name="{{notebook_name}}"
 data-notebook-path="{{notebook_path}}"
-class="notebook_app"
 
 {% endblock %}
 
@@ -37,21 +38,14 @@ class="notebook_app"
 
 
 <span id="save_widget" class="pull-left save_widget">
-    <span class="filename"></span>
+    <span id="notebook_name" class="filename"></span>
     <span class="checkpoint_status"></span>
     <span class="autosave_status"></span>
 </span>
 
-<div id="kernel_selector_widget" class="pull-right dropdown">
-  <!-- empty png in 26 bytes below-->
-  <img id="current_kernel_logo" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs%3D" alt='current kernel logo'>
-  <button class="dropdown-toggle btn btn-sm navbar-btn" data-toggle="dropdown" type='button' id="current_kernel_spec">
-    <span class='kernel_name'>Kernel</span>
-    <span class="caret"></span> 
-  </button>
-  <ul id="kernel_selector" class="dropdown-menu">
-  </ul>
-</div>
+<span id="kernel_logo_widget">
+  <img class="current_kernel_logo" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"/>
+</span>
 
 {% endblock headercontainer %}
 
@@ -64,20 +58,26 @@ class="notebook_app"
               <i class="fa fa-bars"></i>
               <span class="navbar-text">Menu</span>
             </button>
-            <p id="kernel_indicator" class="navbar-text">
+            <p id="kernel_indicator" class="navbar-text indicator_area">
+              <span class="kernel_indicator_name">Kernel</span>
               <i id="kernel_indicator_icon"></i>
             </p>
-            <p id="modal_indicator" class="navbar-text">
-              <i id="modal_indicator_icon"></i>
-            </p>
+            <i id="readonly-indicator" class="navbar-text" title='This notebook is read-only'>
+                <span class="fa-stack">
+                    <i class="fa fa-save fa-stack-1x"></i>
+                    <i class="fa fa-ban fa-stack-2x text-danger"></i>
+                </span>
+            </i>
+            <i id="modal_indicator" class="navbar-text"></i>
             <span id="notification_area"></span>
             <div class="navbar-collapse collapse">
               <ul class="nav navbar-nav">
                 <li class="dropdown"><a href="#" class="dropdown-toggle" data-toggle="dropdown">File</a>
                     <ul id="file_menu" class="dropdown-menu">
-                        <li id="new_notebook"
-                            title="Make a new notebook (Opens a new window)">
-                            <a href="#">New</a></li>
+                        <li id="new_notebook" class="dropdown-submenu">
+                            <a href="#">New Notebook</a>
+                            <ul class="dropdown-menu" id="menu-new-notebook-submenu"></ul>
+                        </li>
                         <li id="open_notebook"
                             title="Opens a new window with the Dashboard view">
                             <a href="#">Open...</a></li>
@@ -106,8 +106,9 @@ class="notebook_app"
                                 <li id="download_ipynb"><a href="#">IPython Notebook (.ipynb)</a></li>
                                 <li id="download_script"><a href="#">Script</a></li>
                                 <li id="download_html"><a href="#">HTML (.html)</a></li>
+                                <li id="download_markdown"><a href="#">Markdown (.md)</a></li>
                                 <li id="download_rst"><a href="#">reST (.rst)</a></li>
-                                <li id="download_pdf"><a href="#">PDF (.pdf)</a></li>
+                                <li id="download_pdf"><a href="#">PDF via LaTeX (.pdf)</a></li>
                             </ul>
                         </li>
                         <li class="divider"></li>
@@ -117,7 +118,7 @@ class="notebook_app"
                         <li class="divider"></li>
                         <li id="kill_and_exit"
                             title="Shutdown this notebook's kernel, and close this window">
-                            <a href="#" >Close and halt</a></li>
+                            <a href="#" >Close and Halt</a></li>
                     </ul>
                 </li>
                 <li class="dropdown"><a href="#" class="dropdown-toggle" data-toggle="dropdown">Edit</a>
@@ -254,17 +255,9 @@ class="notebook_app"
                         {% set
                             sections = (
                                 (
-                                    ("http://ipython.org/documentation.html","IPython Help",True),
-                                    ("http://nbviewer.ipython.org/github/ipython/ipython/tree/2.x/examples/Index.ipynb", "Notebook Help", True),
-                                ),(
-                                    ("http://docs.python.org","Python",True),
-                                    ("http://help.github.com/articles/github-flavored-markdown","Markdown",True),
-                                    ("http://docs.scipy.org/doc/numpy/reference/","NumPy",True),
-                                    ("http://docs.scipy.org/doc/scipy/reference/","SciPy",True),
-                                    ("http://matplotlib.org/contents.html","Matplotlib",True),
-                                    ("http://docs.sympy.org/latest/index.html","SymPy",True),
-                                    ("http://pandas.pydata.org/pandas-docs/stable/","pandas", True)
-                                )
+                                    ("http://nbviewer.ipython.org/github/ipython/ipython/blob/3.x/examples/Notebook/Index.ipynb", "Notebook Help", True),
+                                    ("https://help.github.com/articles/markdown-basics/","Markdown",True),
+                                ),
                             )
                         %}
 
@@ -301,12 +294,17 @@ class="notebook_app"
 
 {% block site %}
 
-
 <div id="ipython-main-app">
     <div id="notebook_panel">
         <div id="notebook"></div>
+        <div id='tooltip' class='ipython_tooltip' style='display:none'></div>
     </div>
 </div>
+
+
+{% endblock %}
+
+{% block after_site %}
 
 <div id="pager">
     <div id="pager-contents">
@@ -315,11 +313,7 @@ class="notebook_app"
     <div id='pager-button-area'></div>
 </div>
 
-<div id='tooltip' class='ipython_tooltip' style='display:none'></div>
-
-
 {% endblock %}
-
 
 {% block script %}
 {{super()}}

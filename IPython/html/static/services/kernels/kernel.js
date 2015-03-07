@@ -28,12 +28,7 @@ define([
 
         this.id = null;
         this.name = name;
-
-        this.channels = {
-            'shell': null,
-            'iopub': null,
-            'stdin': null
-        };
+        this.ws = null;
 
         this.kernel_service_url = kernel_service_url;
         this.kernel_url = null;
@@ -46,6 +41,7 @@ define([
         this.username = "username";
         this.session_id = utils.uuid();
         this._msg_callbacks = {};
+        this._msg_queue = Promise.resolve();
         this.info_reply = {}; // kernel_info_reply stored here after starting
 
         if (typeof(WebSocket) !== 'undefined') {
@@ -136,6 +132,7 @@ define([
         this._iopub_handlers = {};
         this.register_iopub_handler('status', $.proxy(this._handle_status_message, this));
         this.register_iopub_handler('clear_output', $.proxy(this._handle_clear_output, this));
+        this.register_iopub_handler('execute_input', $.proxy(this._handle_input_message, this));
         
         for (var i=0; i < output_msg_types.length; i++) {
             this.register_iopub_handler(output_msg_types[i], $.proxy(this._handle_output_message, this));
@@ -184,6 +181,7 @@ define([
             url = url + "?" + qs;
         }
 
+        this.events.trigger('kernel_starting.Kernel', {kernel: this});
         var that = this;
         var on_success = function (data, status, xhr) {
             that.events.trigger('kernel_created.Kernel', {kernel: that});
@@ -406,7 +404,6 @@ define([
          * @function _kernel_connected
          */
         this.events.trigger('kernel_connected.Kernel', {kernel: this});
-        this.events.trigger('kernel_starting.Kernel', {kernel: this});
         // get kernel info so we know what state the kernel is in
         var that = this;
         this.kernel_info(function (reply) {
@@ -428,7 +425,7 @@ define([
 
     Kernel.prototype.start_channels = function () {
         /**
-         * Start the `shell`and `iopub` channels.
+         * Start the websocket channels.
          * Will stop and restart them if they already exist.
          *
          * @function start_channels
@@ -439,16 +436,12 @@ define([
 
         console.log("Starting WebSockets:", ws_host_url);
         
-        var channel_url = function(channel) {
-            return [
+        this.ws = new this.WebSocket([
                 that.ws_url,
-                utils.url_join_encode(that.kernel_url, channel),
+                utils.url_join_encode(that.kernel_url, 'channels'),
                 "?session_id=" + that.session_id
-            ].join('');
-        };
-        this.channels.shell = new this.WebSocket(channel_url("shell"));
-        this.channels.stdin = new this.WebSocket(channel_url("stdin"));
-        this.channels.iopub = new this.WebSocket(channel_url("iopub"));
+            ].join('')
+        );
         
         var already_called_onclose = false; // only alert once
         var ws_closed_early = function(evt){
@@ -488,28 +481,22 @@ define([
             that._ws_closed(ws_host_url, true);
         };
 
-        for (var c in this.channels) {
-            this.channels[c].onopen = $.proxy(this._ws_opened, this);
-            this.channels[c].onclose = ws_closed_early;
-            this.channels[c].onerror = ws_error;
-        }
+        this.ws.onopen = $.proxy(this._ws_opened, this);
+        this.ws.onclose = ws_closed_early;
+        this.ws.onerror = ws_error;
         // switch from early-close to late-close message after 1s
         setTimeout(function() {
-            for (var c in that.channels) {
-                if (that.channels[c] !== null) {
-                    that.channels[c].onclose = ws_closed_late;
-                }
+            if (that.ws !== null) {
+                that.ws.onclose = ws_closed_late;
             }
         }, 1000);
-        this.channels.shell.onmessage = $.proxy(this._handle_shell_reply, this);
-        this.channels.iopub.onmessage = $.proxy(this._handle_iopub_message, this);
-        this.channels.stdin.onmessage = $.proxy(this._handle_input_request, this);
+        this.ws.onmessage = $.proxy(this._handle_ws_message, this);
     };
 
     Kernel.prototype._ws_opened = function (evt) {
         /**
          * Handle a websocket entering the open state,
-         * signaling that the kernel is connected when all channels are open.
+         * signaling that the kernel is connected when websocket is open.
          *
          * @function _ws_opened
          */
@@ -521,8 +508,7 @@ define([
 
     Kernel.prototype._ws_closed = function(ws_url, error) {
         /**
-         * Handle a websocket entering the closed state. This closes the
-         * other communication channels if they are open. If the websocket
+         * Handle a websocket entering the closed state.  If the websocket
          * was not closed due to an error, try to reconnect to the kernel.
          *
          * @function _ws_closed
@@ -559,27 +545,23 @@ define([
     
     Kernel.prototype.stop_channels = function () {
         /**
-         * Close the websocket channels. After successful close, the value
-         * in `this.channels[channel_name]` will be null.
+         * Close the websocket. After successful close, the value
+         * in `this.ws` will be null.
          *
          * @function stop_channels
          */
         var that = this;
-        var close = function (c) {
-            return function () {
-                if (that.channels[c] && that.channels[c].readyState === WebSocket.CLOSED) {
-                    that.channels[c] = null;
-                }
-            };
+        var close = function () {
+            if (that.ws && that.ws.readyState === WebSocket.CLOSED) {
+                that.ws = null;
+            }
         };
-        for (var c in this.channels) {
-            if ( this.channels[c] !== null ) {
-                if (this.channels[c].readyState === WebSocket.OPEN) {
-                    this.channels[c].onclose = close(c);
-                    this.channels[c].close();
-                } else {
-                    close(c)();
-                }
+        if (this.ws !== null) {
+            if (this.ws.readyState === WebSocket.OPEN) {
+                this.ws.onclose = close;
+                this.ws.close();
+            } else {
+                close();
             }
         }
     };
@@ -587,20 +569,18 @@ define([
     Kernel.prototype.is_connected = function () {
         /**
          * Check whether there is a connection to the kernel. This
-         * function only returns true if all channel objects have been
-         * created and have a state of WebSocket.OPEN.
+         * function only returns true if websocket has been
+         * created and has a state of WebSocket.OPEN.
          *
          * @function is_connected
          * @returns {bool} - whether there is a connection
          */
-        for (var c in this.channels) {
-            // if any channel is not ready, then we're not connected
-            if (this.channels[c] === null) {
-                return false;
-            }
-            if (this.channels[c].readyState !== WebSocket.OPEN) {
-                return false;
-            }
+        // if any channel is not ready, then we're not connected
+        if (this.ws === null) {
+            return false;
+        }
+        if (this.ws.readyState !== WebSocket.OPEN) {
+            return false;
         }
         return true;
     };
@@ -614,12 +594,7 @@ define([
          * @function is_fully_disconnected
          * @returns {bool} - whether the kernel is fully disconnected
          */
-        for (var c in this.channels) {
-            if (this.channels[c] === null) {
-                return true;
-            }
-        }
-        return false;
+        return (this.ws === null);
     };
     
     Kernel.prototype.send_shell_message = function (msg_type, content, callbacks, metadata, buffers) {
@@ -632,7 +607,8 @@ define([
             throw new Error("kernel is not connected");
         }
         var msg = this._get_msg(msg_type, content, metadata, buffers);
-        this.channels.shell.send(serialize.serialize(msg));
+        msg.channel = 'shell';
+        this.ws.send(serialize.serialize(msg));
         this.set_callbacks_for_msg(msg.header.msg_id, callbacks);
         return msg.header.msg_id;
     };
@@ -783,7 +759,8 @@ define([
         };
         this.events.trigger('input_reply.Kernel', {kernel: this, content: content});
         var msg = this._get_msg("input_reply", content);
-        this.channels.stdin.send(serialize.serialize(msg));
+        msg.channel = 'stdin';
+        this.ws.send(serialize.serialize(msg));
         return msg.header.msg_id;
     };
 
@@ -876,20 +853,39 @@ define([
             this.last_msg_callbacks = {};
         }
     };
-
-    /**
-     * @function _handle_shell_reply
-     */
-    Kernel.prototype._handle_shell_reply = function (e) {
-        serialize.deserialize(e.data, $.proxy(this._finish_shell_reply, this));
+    
+    Kernel.prototype._handle_ws_message = function (e) {
+        var that = this;
+        this._msg_queue = this._msg_queue.then(function() {
+            return serialize.deserialize(e.data);
+        }).then(function(msg) {return that._finish_ws_message(msg);})
+        .catch(utils.reject("Couldn't process kernel message", true));
     };
 
-    Kernel.prototype._finish_shell_reply = function (reply) {
+    Kernel.prototype._finish_ws_message = function (msg) {
+        switch (msg.channel) {
+            case 'shell':
+                return this._handle_shell_reply(msg);
+                break;
+            case 'iopub':
+                return this._handle_iopub_message(msg);
+                break;
+            case 'stdin':
+                return this._handle_input_request(msg);
+                break;
+            default:
+                console.error("unrecognized message channel", msg.channel, msg);
+        }
+    };
+    
+    Kernel.prototype._handle_shell_reply = function (reply) {
         this.events.trigger('shell_reply.Kernel', {kernel: this, reply:reply});
+        var that = this;
         var content = reply.content;
         var metadata = reply.metadata;
         var parent_id = reply.parent_header.msg_id;
         var callbacks = this.get_callbacks_for_msg(parent_id);
+        var promise = Promise.resolve();
         if (!callbacks || !callbacks.shell) {
             return;
         }
@@ -899,17 +895,21 @@ define([
         this._finish_shell(parent_id);
         
         if (shell_callbacks.reply !== undefined) {
-            shell_callbacks.reply(reply);
+            promise = promise.then(function() {return shell_callbacks.reply(reply)});
         }
         if (content.payload && shell_callbacks.payload) {
-            this._handle_payloads(content.payload, shell_callbacks.payload, reply);
+            promise = promise.then(function() {
+                return that._handle_payloads(content.payload, shell_callbacks.payload, reply);
+            });
         }
+        return promise;
     };
 
     /**
      * @function _handle_payloads
      */
     Kernel.prototype._handle_payloads = function (payloads, payload_callbacks, msg) {
+        var promise = [];
         var l = payloads.length;
         // Payloads are handled by triggering events because we don't want the Kernel
         // to depend on the Notebook or Pager classes.
@@ -917,9 +917,10 @@ define([
             var payload = payloads[i];
             var callback = payload_callbacks[payload.source];
             if (callback) {
-                callback(payload, msg);
+                promise.push(callback(payload, msg));
             }
         }
+        return Promise.all(promise);
     };
 
     /**
@@ -998,6 +999,9 @@ define([
     Kernel.prototype._handle_output_message = function (msg) {
         var callbacks = this.get_callbacks_for_msg(msg.parent_header.msg_id);
         if (!callbacks || !callbacks.iopub) {
+            // The message came from another client. Let the UI decide what to
+            // do with it.
+            this.events.trigger('received_unsolicited_message.Kernel', msg);
             return;
         }
         var callback = callbacks.iopub.output;
@@ -1007,32 +1011,36 @@ define([
     };
 
     /**
+     * Handle an input message (execute_input).
+     *
+     * @function _handle_input message
+     */
+    Kernel.prototype._handle_input_message = function (msg) {
+        var callbacks = this.get_callbacks_for_msg(msg.parent_header.msg_id);
+        if (!callbacks) {
+            // The message came from another client. Let the UI decide what to
+            // do with it.
+            this.events.trigger('received_unsolicited_message.Kernel', msg);
+        }
+    };
+
+    /**
      * Dispatch IOPub messages to respective handlers. Each message
      * type should have a handler.
      *
      * @function _handle_iopub_message
      */
-    Kernel.prototype._handle_iopub_message = function (e) {
-        serialize.deserialize(e.data, $.proxy(this._finish_iopub_message, this));
-    };
-
-
-    Kernel.prototype._finish_iopub_message = function (msg) {
+    Kernel.prototype._handle_iopub_message = function (msg) {
         var handler = this.get_iopub_handler(msg.header.msg_type);
         if (handler !== undefined) {
-            handler(msg);
+            return handler(msg);
         }
     };
 
     /**
      * @function _handle_input_request
      */
-    Kernel.prototype._handle_input_request = function (e) {
-        serialize.deserialize(e.data, $.proxy(this._finish_input_request, this));
-    };
-
-
-    Kernel.prototype._finish_input_request = function (request) {
+    Kernel.prototype._handle_input_request = function (request) {
         var header = request.header;
         var content = request.content;
         var metadata = request.metadata;

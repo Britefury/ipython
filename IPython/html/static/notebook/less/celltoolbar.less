@@ -12,7 +12,11 @@
     padding-right: 4px;
     .hbox();
     .end();
+    @media print{
+        display: none;
+    }
 }
+
 
 .ctb_hideshow {
     display:none;
@@ -27,10 +31,15 @@
 }
 
 .ctb_global_show .ctb_show + .input_area,
-.ctb_global_show .ctb_show + div.text_cell_input
-{
+.ctb_global_show .ctb_show + div.text_cell_input,
+.ctb_global_show .ctb_show ~ div.text_cell_render {
     border-top-right-radius: 0px;
     border-top-left-radius: 0px;
+}
+
+.ctb_global_show .ctb_show ~ div.text_cell_render {
+    // add border to rendered markdown cells
+    border: @border_width solid @light_border_color;
 }
 
 .celltoolbar {
@@ -41,9 +50,12 @@
 .celltoolbar select {
     .form-control();
     .input-sm();
+    // undo some of the sizing caused by the above mixins
     width: inherit;
-    font-size: 87%;
+    font-size: inherit;
     height: 22px;
+    padding: 0px;
+    
     display: inline-block;
 
 }

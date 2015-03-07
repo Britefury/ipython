@@ -106,7 +106,7 @@ In this case, ``x = range(10000)`` is called as the line argument, and the
 block with ``min(x)`` and ``max(x)`` is called as the cell body.  The
 :magic:`timeit` magic receives both.
   
-If you have 'automagic' enabled (as it by default), you don't need to type in
+If you have 'automagic' enabled (as it is by default), you don't need to type in
 the single ``%`` explicitly for line magics; IPython will scan its internal
 list of magic functions and call one if it exists. With automagic on you can
 then just type ``cd mydir`` to go to directory 'mydir'::
@@ -114,7 +114,7 @@ then just type ``cd mydir`` to go to directory 'mydir'::
       In [9]: cd mydir
       /home/fperez/mydir
 
-Note that cell magics *always* require an explicit ``%%`` prefix, automagic
+Cell magics *always* require an explicit ``%%`` prefix, automagic
 calling only works for line magics.
       
 The automagic system has the lowest possible precedence in name searches, so
@@ -144,6 +144,10 @@ use it:
     In [6]: cd ipython
 
     /home/fperez/ipython
+
+Line magics, if they return a value, can be assigned to a variable using the syntax
+``l = %sx ls`` (which in this particular case returns the result of `ls` as a python list).  
+See :ref:`below <manual_capture>` for more information.
 
 Type ``%magic`` for more information, including a list of all available magic
 functions at any time and their docstrings. You can also type
@@ -206,7 +210,7 @@ information about your working environment:
       identifiers and %whos prints a table with some basic details about
       each identifier.
 
-Note that the dynamic object information functions (?/??, ``%pdoc``,
+The dynamic object information functions (?/??, ``%pdoc``,
 ``%pfile``, ``%pdef``, ``%psource``) work on object attributes, as well as
 directly on variables. For example, after doing ``import os``, you can use
 ``os.path.abspath??``.
@@ -356,16 +360,22 @@ Any input line beginning with a ! character is passed verbatim (minus
 the !, of course) to the underlying operating system. For example,
 typing ``!ls`` will run 'ls' in the current directory.
 
-Manual capture of command output
---------------------------------
+.. _manual_capture:
+
+Manual capture of command output and magic output
+-------------------------------------------------
 
 You can assign the result of a system command to a Python variable with the
-syntax ``myfiles = !ls``. This gets machine readable output from stdout 
-(e.g. without colours), and splits on newlines. To explicitly get this sort of
-output without assigning to a variable, use two exclamation marks (``!!ls``) or
-the :magic:`sx` magic command.
+syntax ``myfiles = !ls``. Similarly, the result of a magic (as long as it returns
+a value) can be assigned to a variable.  For example, the syntax ``myfiles = %sx ls``
+is equivalent to the above system command example (the :magic:`sx` magic runs a shell command
+and captures the output).  Each of these gets machine 
+readable output from stdout (e.g. without colours), and splits on newlines. To 
+explicitly get this sort of output without assigning to a variable, use two 
+exclamation marks (``!!ls``) or the :magic:`sx` magic command without an assignment.
+(However, ``!!`` commands cannot be assigned to a variable.)
 
-The captured list has some convenience features. ``myfiles.n`` or ``myfiles.s``
+The captured list in this example has some convenience features. ``myfiles.n`` or ``myfiles.s``
 returns a string delimited by newlines or spaces, respectively. ``myfiles.p``
 produces `path objects <http://pypi.python.org/pypi/path.py>`_ from the list items.
 See :ref:`string_lists` for details.
@@ -843,7 +853,7 @@ Second, when using the ``PyOSInputHook`` approach, a GUI application should
 in IPython and as standalone apps need to have special code to detects how the
 application is being run. We highly recommend using IPython's support for this.
 Since the details vary slightly between toolkits, we point you to the various
-examples in our source directory :file:`examples/lib` that demonstrate
+examples in our source directory :file:`examples/Embedding` that demonstrate
 these capabilities.
 
 Third, unlike previous versions of IPython, we no longer "hijack" (replace
@@ -852,7 +862,7 @@ actually need to run the real event loops to do so. This is often needed to
 process pending events at critical points.
 
 Finally, we also have a number of examples in our source directory
-:file:`examples/lib` that demonstrate these capabilities.
+:file:`examples/Embedding` that demonstrate these capabilities.
 
 PyQt and PySide
 ---------------
@@ -861,14 +871,14 @@ PyQt and PySide
 
 When you use ``--gui=qt`` or ``--matplotlib=qt``, IPython can work with either
 PyQt4 or PySide.  There are three options for configuration here, because
-PyQt4 has two APIs for QString and QVariant - v1, which is the default on
+PyQt4 has two APIs for QString and QVariant: v1, which is the default on
 Python 2, and the more natural v2, which is the only API supported by PySide.
 v2 is also the default for PyQt4 on Python 3.  IPython's code for the QtConsole
 uses v2, but you can still use any interface in your code, since the
 Qt frontend is in a different process.
 
 The default will be to import PyQt4 without configuration of the APIs, thus
-matching what most applications would expect. It will fall back of PySide if
+matching what most applications would expect. It will fall back to PySide if
 PyQt4 is unavailable.
 
 If specified, IPython will respect the environment variable ``QT_API`` used

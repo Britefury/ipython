@@ -51,7 +51,10 @@ class ZMQShellDisplayHook(DisplayHook):
         self.parent_header = extract_header(parent)
 
     def start_displayhook(self):
-        self.msg = self.session.msg(u'execute_result', {}, parent=self.parent_header)
+        self.msg = self.session.msg(u'execute_result', {
+            'data': {},
+            'metadata': {},
+        }, parent=self.parent_header)
 
     def write_output_prompt(self):
         """Write the output prompt."""
@@ -65,6 +68,7 @@ class ZMQShellDisplayHook(DisplayHook):
         """Finish up all displayhook activities."""
         sys.stdout.flush()
         sys.stderr.flush()
-        self.session.send(self.pub_socket, self.msg, ident=self.topic)
+        if self.msg['content']['data']:
+            self.session.send(self.pub_socket, self.msg, ident=self.topic)
         self.msg = None
 

@@ -396,33 +396,34 @@ class JSController(TestController):
         self.server_port = info['port']
 
     def cleanup(self):
-        try:
-            self.server.terminate()
-        except OSError:
-            # already dead
-            pass
-        # wait 10s for the server to shutdown
-        try:
-            popen_wait(self.server, NOTEBOOK_SHUTDOWN_TIMEOUT)
-        except TimeoutExpired:
-            # server didn't terminate, kill it
+        if hasattr(self, 'server'):
             try:
-                print("Failed to terminate notebook server, killing it.",
-                    file=sys.stderr
-                )
-                self.server.kill()
+                self.server.terminate()
             except OSError:
                 # already dead
                 pass
-        # wait another 10s
-        try:
-            popen_wait(self.server, NOTEBOOK_SHUTDOWN_TIMEOUT)
-        except TimeoutExpired:
-            print("Notebook server still running (%s)" % self.server_info_file,
-                file=sys.stderr
-            )
-            
-        self.stream_capturer.halt()
+            # wait 10s for the server to shutdown
+            try:
+                popen_wait(self.server, NOTEBOOK_SHUTDOWN_TIMEOUT)
+            except TimeoutExpired:
+                # server didn't terminate, kill it
+                try:
+                    print("Failed to terminate notebook server, killing it.",
+                        file=sys.stderr
+                    )
+                    self.server.kill()
+                except OSError:
+                    # already dead
+                    pass
+            # wait another 10s
+            try:
+                popen_wait(self.server, NOTEBOOK_SHUTDOWN_TIMEOUT)
+            except TimeoutExpired:
+                print("Notebook server still running (%s)" % self.server_info_file,
+                    file=sys.stderr
+                )
+              
+            self.stream_capturer.halt()
         TestController.cleanup(self)
 
 
@@ -435,8 +436,7 @@ def prepare_controllers(options):
             js_testgroups = all_js_groups()
         else:
             js_testgroups = [g for g in testgroups if g.startswith(js_prefix)]
-        
-        py_testgroups = [g for g in testgroups if g not in ['js'] + js_testgroups]
+        py_testgroups = [g for g in testgroups if not g.startswith('js')]
     else:
         py_testgroups = py_test_group_names
         if not options.all:
@@ -636,7 +636,7 @@ def run_iptestall(options):
         print()
 
     if options.coverage:
-        from coverage import coverage
+        from coverage import coverage, CoverageException
         cov = coverage(data_file='.coverage')
         cov.combine()
         cov.save()
@@ -671,7 +671,12 @@ def run_iptestall(options):
 
         # Coverage XML report
         elif options.coverage == 'xml':
-            cov.xml_report(outfile='ipy_coverage.xml')
+            try:
+                cov.xml_report(outfile='ipy_coverage.xml')
+            except CoverageException as e:
+                print('Generating coverage report failed. Are you running javascript tests only?')
+                import traceback
+                traceback.print_exc()
 
     if failed:
         # Ensure that our exit code indicates failure

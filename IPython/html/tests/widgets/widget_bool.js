@@ -1,5 +1,6 @@
 // Test widget bool class
 casper.notebook_test(function () {
+    "use strict";
 
     // Create a checkbox and togglebutton.
     var bool_index = this.append_cell(
@@ -48,7 +49,7 @@ casper.notebook_test(function () {
             'Toggle button exists.');
 
         this.test.assert(this.cell_element_function(bool_index, 
-            widget_togglebutton_selector, 'html')=="Title",
+            widget_togglebutton_selector, 'html')=='<i class="fa"></i>Title',
             'Toggle button labeled correctly.');
 
         this.test.assert(this.cell_element_function(bool_index, 
@@ -57,7 +58,7 @@ casper.notebook_test(function () {
     });
 
     // Try changing the state of the widgets programatically.
-    index = this.append_cell(
+    var index = this.append_cell(
         'bool_widgets[0].value = False\n' +
         'bool_widgets[1].value = False\n' +
         'print("Success")');

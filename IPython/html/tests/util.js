@@ -13,7 +13,9 @@ casper.open_new_notebook = function () {
     var baseUrl = this.get_notebook_server();
     this.start(baseUrl);
     this.waitFor(this.page_loaded);
-    this.thenClick('button#new_notebook');
+    this.waitForSelector('#kernel-python2 a, #kernel-python3 a');
+    this.thenClick('#kernel-python2 a, #kernel-python3 a');
+    
     this.waitForPopup('');
 
     this.withPopup('', function () {this.waitForSelector('.CodeMirror-code');});
@@ -394,7 +396,7 @@ casper.validate_notebook_state = function(message, mode, cell_index) {
         if (cell_index!==undefined) {
             // Is the specified cell the only cell in edit mode?
             this.test.assert(this.is_only_cell_edit(cell_index),
-                message + '; cell ' + cell_index + ' is the only cell in edit mode');
+                message + '; cell ' + cell_index + ' is the only cell in edit mode '+ this.cells_modes());
             // Is the specified cell the only cell with a focused code mirror?
             this.test.assert(this.is_cell_editor_focused(cell_index),
                 message + '; cell ' + cell_index + '\'s editor is appropriately focused');
@@ -421,8 +423,9 @@ casper.click_cell_editor = function(index) {
     // region of codemirror that the user can focus.
     this.evaluate(function (i) {
         var cm = IPython.notebook.get_cell(i).code_mirror;
-        if (cm.options.readOnly != "nocursor" && (document.activeElement != cm.display.input))
+        if (cm.options.readOnly != "nocursor" && (document.activeElement != cm.display.input)){
             cm.display.input.focus();
+        }
     }, {i: index});
 };
 
@@ -505,7 +508,19 @@ casper.is_only_cell_selected = function(index) {
 casper.is_only_cell_edit = function(index) {
     // Check if a cell is the only cell in edit mode.
     // Pass null as the index to check if all of the cells are in command mode.
-    return this.is_only_cell_on(index, 'edit_mode', 'command_mode');
+    var cells_length = this.get_cells_length();
+    for (var j = 0; j < cells_length; j++) {
+        if (j === index) {
+            if (!this.cell_mode_is(j, 'edit')) {
+                return false;
+            }
+        } else {
+            if (this.cell_mode_is(j, 'edit')) {
+                return false;
+            }
+        }
+    }
+    return true;
 };
 
 casper.is_only_cell_on = function(i, on_class, off_class) {
@@ -526,6 +541,24 @@ casper.is_only_cell_on = function(i, on_class, off_class) {
     }
     return true;
 };
+
+casper.cells_modes = function(){
+    return this.evaluate(function(){
+        return IPython.notebook.get_cells().map(function(x,c){return x.mode})
+    }, {});
+};
+
+casper.cell_mode_is = function(index, mode) {
+    // Check if a cell is in a specific mode
+    return this.evaluate(function(i, m) {
+        var cell = IPython.notebook.get_cell(i);
+        if (cell) {
+            return cell.mode === m;
+        }
+        return false;
+    }, {i : index, m: mode});
+};
+
 
 casper.cell_has_class = function(index, classes) {
     // Check if a cell has a class.
@@ -560,7 +593,7 @@ casper.assert_colors_equal = function (hex_color, local_color, msg) {
 
     // If the local color is rgb, clean it up and replace 
     if (local_color.substr(0,3).toLowerCase() == 'rgb') {
-        components = local_color.substr(3).split(',');
+        var components = local_color.substr(3).split(',');
         local_color = '';
         for (var i = 0; i < components.length; i++) {
             var part = parseInt(components[i]).toString(16);

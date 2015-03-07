@@ -1,16 +1,9 @@
-"""test building messages with streamsession"""
+"""test building messages with Session"""
 
-#-------------------------------------------------------------------------------
-#  Copyright (C) 2011  The IPython Development Team
-#
-#  Distributed under the terms of the BSD License.  The full license is in
-#  the file COPYING, distributed as part of this software.
-#-------------------------------------------------------------------------------
+# Copyright (c) IPython Development Team.
+# Distributed under the terms of the Modified BSD License.
 
-#-------------------------------------------------------------------------------
-# Imports
-#-------------------------------------------------------------------------------
-
+import hmac
 import os
 import uuid
 from datetime import datetime
@@ -71,6 +64,10 @@ class TestSession(SessionTestCase):
         # ensure floats don't come out as Decimal:
         self.assertEqual(type(new_msg['content']['b']),type(new_msg['content']['b']))
 
+    def test_default_secure(self):
+        self.assertIsInstance(self.session.key, bytes)
+        self.assertIsInstance(self.session.auth, hmac.HMAC)
+
     def test_send(self):
         ctx = zmq.Context.instance()
         A = ctx.socket(zmq.PAIR)
@@ -91,9 +88,10 @@ class TestSession(SessionTestCase):
         self.assertEqual(new_msg['parent_header'],msg['parent_header'])
         self.assertEqual(new_msg['metadata'],msg['metadata'])
         self.assertEqual(new_msg['buffers'],[b'bar'])
-
+        
         content = msg['content']
         header = msg['header']
+        header['msg_id'] = self.session.msg_id
         parent = msg['parent_header']
         metadata = msg['metadata']
         msg_type = header['msg_type']
@@ -102,18 +100,20 @@ class TestSession(SessionTestCase):
         ident, msg_list = self.session.feed_identities(B.recv_multipart())
         new_msg = self.session.deserialize(msg_list)
         self.assertEqual(ident[0], b'foo')
-        self.assertEqual(new_msg['msg_id'],msg['msg_id'])
+        self.assertEqual(new_msg['msg_id'],header['msg_id'])
         self.assertEqual(new_msg['msg_type'],msg['msg_type'])
         self.assertEqual(new_msg['header'],msg['header'])
         self.assertEqual(new_msg['content'],msg['content'])
         self.assertEqual(new_msg['metadata'],msg['metadata'])
         self.assertEqual(new_msg['parent_header'],msg['parent_header'])
         self.assertEqual(new_msg['buffers'],[b'bar'])
-
+        
+        header['msg_id'] = self.session.msg_id
+        
         self.session.send(A, msg, ident=b'foo', buffers=[b'bar'])
         ident, new_msg = self.session.recv(B)
         self.assertEqual(ident[0], b'foo')
-        self.assertEqual(new_msg['msg_id'],msg['msg_id'])
+        self.assertEqual(new_msg['msg_id'],header['msg_id'])
         self.assertEqual(new_msg['msg_type'],msg['msg_type'])
         self.assertEqual(new_msg['header'],msg['header'])
         self.assertEqual(new_msg['content'],msg['content'])

@@ -435,7 +435,7 @@ class DOMWidget(Widget):
     width = CUnicode(sync=True)
     height = CUnicode(sync=True)
     # A default padding of 2.5 px makes the widgets look nice when displayed inline.
-    padding = CUnicode("2.5px", sync=True)
+    padding = CUnicode(sync=True)
     margin = CUnicode(sync=True)
 
     color = Unicode(sync=True)
@@ -472,7 +472,7 @@ class DOMWidget(Widget):
         'bolder', 
         'lighter',
         'initial', 
-        'inherit', ''] + [str(100 * (i+1)) for i in range(9)], 
+        'inherit', ''] + list(map(str, range(100,1000,100))),
         default_value='', sync=True)
     font_size = CUnicode(sync=True)
     font_family = Unicode(sync=True)

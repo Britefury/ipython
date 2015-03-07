@@ -56,6 +56,7 @@ def upgrade(nb, from_version=3, from_minor=0):
                 cells.append(upgrade_cell(cell))
         # upgrade metadata
         nb.metadata.pop('name', '')
+        nb.metadata.pop('signature', '')
         # Validate the converted notebook before returning it
         _warn_if_invalid(nb, nbformat)
         return nb
@@ -185,7 +186,7 @@ def upgrade_output(output):
     elif output['output_type'] == 'pyerr':
         output['output_type'] = 'error'
     elif output['output_type'] == 'stream':
-        output['name'] = output.pop('stream')
+        output['name'] = output.pop('stream', 'stdout')
     return output
 
 def downgrade_output(output):

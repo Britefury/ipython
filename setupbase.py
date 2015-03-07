@@ -24,9 +24,10 @@ from distutils.command.build_scripts import build_scripts
 from distutils.command.install import install
 from distutils.command.install_scripts import install_scripts
 from distutils.cmd import Command
+from distutils.errors import DistutilsExecError
 from fnmatch import fnmatch
 from glob import glob
-from subprocess import check_call
+from subprocess import Popen, PIPE
 
 from setupext import install_data_ext
 
@@ -669,9 +670,11 @@ def get_bdist_wheel():
                     if found:
                         lis.pop(idx)
                 
-                for pkg in ("gnureadline", "pyreadline", "mock"):
+                for pkg in ("gnureadline", "pyreadline", "mock", "terminado"):
                     _remove_startswith(requires, pkg)
                 requires.append("gnureadline; sys.platform == 'darwin' and platform.python_implementation == 'CPython'")
+                requires.append("terminado (>=0.3.3); extra == 'notebook' and sys.platform != 'win32'")
+                requires.append("terminado (>=0.3.3); extra == 'all' and sys.platform != 'win32'")
                 requires.append("pyreadline (>=2.0); extra == 'terminal' and sys.platform == 'win32' and platform.python_implementation == 'CPython'")
                 requires.append("pyreadline (>=2.0); extra == 'all' and sys.platform == 'win32' and platform.python_implementation == 'CPython'")
                 requires.append("mock; extra == 'test' and python_version < '3.3'")
@@ -712,7 +715,15 @@ class CompileCSS(Command):
             cmd.append('--minify')
         if self.force:
             cmd.append('--force')
-        check_call(cmd, cwd=pjoin(repo_root, "IPython", "html"))
+        try:
+            p = Popen(cmd, cwd=pjoin(repo_root, "IPython", "html"), stderr=PIPE)
+        except OSError:
+            raise DistutilsExecError("invoke is required to rebuild css (pip install invoke)")
+        out, err = p.communicate()
+        if p.returncode:
+            if sys.version_info[0] >= 3:
+                err = err.decode('utf8', 'replace')
+            raise DistutilsExecError(err.strip())
 
 
 class JavascriptVersion(Command):
@@ -731,13 +742,17 @@ class JavascriptVersion(Command):
         with open(nsfile) as f:
             lines = f.readlines()
         with open(nsfile, 'w') as f:
+            found = False
             for line in lines:
-                if line.startswith("IPython.version"):
-                    line = 'IPython.version = "{0}";\n'.format(version)
+                if line.strip().startswith("IPython.version"):
+                    line = '    IPython.version = "{0}";\n'.format(version)
+                    found = True
                 f.write(line)
+            if not found:
+                raise RuntimeError("Didn't find IPython.version line in %s" % nsfile)
 
 
-def css_js_prerelease(command, strict=True):
+def css_js_prerelease(command):
     """decorator for building js/minified css prior to a release"""
     class DecoratedCommand(command):
         def run(self):
@@ -747,9 +762,7 @@ def css_js_prerelease(command, strict=True):
             try:
                 self.distribution.run_command('css')
             except Exception as e:
-                if strict:
-                    raise
-                else:
-                    log.warn("Failed to build css sourcemaps: %s" % e)
+                log.warn("rebuilding css and sourcemaps failed (not a problem)")
+                log.warn(str(e))
             command.run(self)
     return DecoratedCommand

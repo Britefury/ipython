@@ -20,7 +20,7 @@ define([
          *          base_url: string
          */
         this.base_url = options.base_url || utils.get_body_data("baseUrl");
-        this.element_name = options.element_name || 'terminal';
+        this.element_name = options.element_name || 'running';
         this.selector = selector;
         this.terminals = [];
         if (this.selector !== undefined) {
@@ -38,11 +38,11 @@ define([
         $('#refresh_' + this.element_name + '_list').click(function () {
             that.load_terminals();
         });
-        $('#new_terminal').click($.proxy(this.new_terminal, this));
+        $('#new-terminal').click($.proxy(this.new_terminal, this));
     };
 
     TerminalList.prototype.new_terminal = function () {
-        var w = window.open();
+        var w = window.open(undefined, IPython._target);
         var base_url = this.base_url;
         var settings = {
             type : "POST",
@@ -64,7 +64,6 @@ define([
     };
     
     TerminalList.prototype.load_terminals = function() {
-        var that = this;
         var url = utils.url_join_encode(this.base_url, 'api/terminals');
         $.ajax(url, {
             type: "GET",
@@ -78,7 +77,7 @@ define([
     TerminalList.prototype.terminals_loaded = function (data) {
         this.terminals = data;
         this.clear_list();
-        var item, path_name, term;
+        var item, term;
         for (var i=0; i < this.terminals.length; i++) {
             term = this.terminals[i];
             item = this.new_item(-1);
@@ -94,13 +93,13 @@ define([
         item.find(".item_icon").addClass("fa fa-terminal");
         var link = item.find("a.item_link")
             .attr('href', utils.url_join_encode(this.base_url, "terminals", name));
-        link.attr('target', '_blank');
+        link.attr('target', IPython._target||'_blank');
         this.add_shutdown_button(name, item);
     };
     
     TerminalList.prototype.add_shutdown_button = function(name, item) {
         var that = this;
-        var shutdown_button = $("<button/>").text("Shutdown").addClass("btn btn-xs btn-danger").
+        var shutdown_button = $("<button/>").text("Shutdown").addClass("btn btn-xs btn-warning").
             click(function (e) {
                 var settings = {
                     processData : false,

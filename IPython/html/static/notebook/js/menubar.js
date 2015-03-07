@@ -76,7 +76,7 @@ define([
             notebook_path
         ) + "?download=" + download.toString();
         
-        var w = window.open()
+        var w = window.open(undefined, IPython._target);
         if (this.notebook.dirty) {
             this.notebook.save_notebook().then(function() {
                 w.location = url;
@@ -98,30 +98,10 @@ define([
          *  File
          */
         var that = this;
-        this.element.find('#new_notebook').click(function () {
-            var w = window.open();
-            // Create a new notebook in the same path as the current
-            // notebook's path.
-            var parent = utils.url_path_split(that.notebook.notebook_path)[0];
-            that.contents.new_untitled(parent, {type: "notebook"}).then(
-                    function (data) {
-                        w.location = utils.url_join_encode(
-                                that.base_url, 'notebooks', data.path
-                            );
-                    },
-                    function(error) {
-                        w.close();
-                        dialog.modal({
-                            title : 'Creating Notebook Failed',
-                            body : "The error was: " + error.message,
-                            buttons : {'OK' : {'class' : 'btn-primary'}}
-                        });
-                    }
-                );
-        });
+        
         this.element.find('#open_notebook').click(function () {
             var parent = utils.url_path_split(that.notebook.notebook_path)[0];
-            window.open(utils.url_join_encode(that.base_url, 'tree', parent));
+            window.open(utils.url_join_encode(that.base_url, 'tree', parent), IPython._target);
         });
         this.element.find('#copy_notebook').click(function () {
             that.notebook.copy_notebook();
@@ -146,6 +126,10 @@ define([
             that._nbconvert('html', true);
         });
 
+        this.element.find('#download_markdown').click(function () {
+            that._nbconvert('markdown', true);
+        });
+
         this.element.find('#download_rst').click(function () {
             that._nbconvert('rst', true);
         });
@@ -161,25 +145,31 @@ define([
         this.element.find('#rename_notebook').click(function () {
             that.save_widget.rename_notebook({notebook: that.notebook});
         });
+
         this.element.find('#save_checkpoint').click(function () {
             that.notebook.save_checkpoint();
         });
+
         this.element.find('#restore_checkpoint').click(function () {
         });
+
         this.element.find('#trust_notebook').click(function () {
             that.notebook.trust_notebook();
         });
         this.events.on('trust_changed.Notebook', function (event, trusted) {
             if (trusted) {
                 that.element.find('#trust_notebook')
-                    .addClass("disabled")
+                    .addClass("disabled").off('click')
                     .find("a").text("Trusted Notebook");
             } else {
                 that.element.find('#trust_notebook')
-                    .removeClass("disabled")
+                    .removeClass("disabled").on('click', function () {
+                        that.notebook.trust_notebook();
+                    })
                     .find("a").text("Trust Notebook");
             }
         });
+
         this.element.find('#kill_and_exit').click(function () {
             var close_window = function () {
                 /**
@@ -191,6 +181,7 @@ define([
             // finish with close on success or failure
             that.notebook.session.delete(close_window, close_window);
         });
+
         // Edit
         this.element.find('#cut_cell').click(function () {
             that.notebook.cut_cell();
@@ -227,7 +218,8 @@ define([
         
         // View
         this.element.find('#toggle_header').click(function () {
-            $('div#header-container').toggle();
+            $('#header-container').toggle();
+            $('.header-bar').toggle();
             that._size_header();
         });
         this.element.find('#toggle_toolbar').click(function () {
@@ -332,6 +324,7 @@ define([
         this.events.on('kernel_ready.Kernel', function(event, data) {
             var langinfo = data.kernel.info_reply.language_info || {};
             that.update_nbconvert_script(langinfo);
+            that.add_kernel_help_links(data.kernel.info_reply.help_links || []);
         });
     };
 
@@ -371,12 +364,51 @@ define([
          * Set the 'Download as foo' menu option for the relevant language.
          */
         var el = this.element.find('#download_script');
-        var that = this;
         
         // Set menu entry text to e.g. "Python (.py)"
-        var langname = (langinfo.name || 'Script')
-        langname = langname.charAt(0).toUpperCase()+langname.substr(1) // Capitalise
+        var langname = (langinfo.name || 'Script');
+        langname = langname.charAt(0).toUpperCase()+langname.substr(1); // Capitalise
         el.find('a').text(langname + ' ('+(langinfo.file_extension || 'txt')+')');
+    };
+
+    MenuBar.prototype.add_kernel_help_links = function(help_links) {
+        /** add links from kernel_info to the help menu */
+        var divider = $("#kernel-help-links");
+        if (divider.length === 0) {
+            // insert kernel help section above about link
+            var about = $("#notebook_about").parent();
+            divider = $("<li>")
+                .attr('id', "kernel-help-links")
+                .addClass('divider');
+            about.prev().before(divider);
+        }
+        // remove previous entries
+        while (!divider.next().hasClass('divider')) {
+            divider.next().remove();
+        }
+        if (help_links.length === 0) {
+            // no help links, remove the divider
+            divider.remove();
+            return;
+        }
+        var cursor = divider;
+        help_links.map(function (link) {
+            cursor.after($("<li>")
+                .append($("<a>")
+                    .attr('target', '_blank')
+                    .attr('title', 'Opens in a new window')
+                    .attr('href', link.url)
+                    .append($("<i>")
+                        .addClass("fa fa-external-link menu-icon pull-right")
+                    )
+                    .append($("<span>")
+                        .text(link.text)
+                    )
+                )
+            );
+            cursor = cursor.next();
+        });
+        
     };
 
     // Backwards compatability.

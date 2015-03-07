@@ -40,7 +40,7 @@ define([
     var Cell = cell.Cell;
 
     /* local util for codemirror */
-    var posEq = function(a, b) {return a.line == b.line && a.ch == b.ch;};
+    var posEq = function(a, b) {return a.line === b.line && a.ch === b.ch;};
 
     /**
      *
@@ -97,26 +97,11 @@ define([
         this.input_prompt_number = null;
         this.celltoolbar = null;
         this.output_area = null;
-        // Keep a stack of the 'active' output areas (where active means the 
-        // output area that recieves output).  When a user activates an output
-        // area, it gets pushed to the stack.  Then, when the output area is
-        // deactivated, it's popped from the stack.  When the stack is empty,
-        // the cell's output area is used.
-        this.active_output_areas = [];
-        var that = this;
-        Object.defineProperty(this, 'active_output_area', {
-            get: function() {
-                if (that.active_output_areas && that.active_output_areas.length > 0) {
-                    return that.active_output_areas[that.active_output_areas.length-1];
-                } else {
-                    return that.output_area;
-                }
-            },
-        });
 
         this.last_msg_id = null;
         this.completer = null;
         this.widget_views = [];
+        this._widgets_live = true;
 
         Cell.apply(this,[{
             config: $.extend({}, CodeCell.options_default), 
@@ -125,6 +110,7 @@ define([
 
         // Attributes we want to override in this subclass.
         this.cell_type = "code";
+        var that  = this;
         this.element.focusout(
             function() { that.auto_highlight(); }
         );
@@ -146,7 +132,7 @@ define([
     };
 
     CodeCell.config_defaults = {
-        cell_magic_highlight : {
+        highlight_modes : {
             'magic_javascript'    :{'reg':[/^%%javascript/]},
             'magic_perl'          :{'reg':[/^%%perl/]},
             'magic_ruby'          :{'reg':[/^%%ruby/]},
@@ -161,33 +147,10 @@ define([
 
     CodeCell.prototype = Object.create(Cell.prototype);
 
-    /**
-     * @method push_output_area
-     */
-    CodeCell.prototype.push_output_area = function (output_area) {
-        this.active_output_areas.push(output_area);
-    };
-
-    /**
-     * @method pop_output_area
-     */
-    CodeCell.prototype.pop_output_area = function (output_area) {
-        var index = this.active_output_areas.lastIndexOf(output_area);
-        if (index > -1) {
-            this.active_output_areas.splice(index, 1);
-        }
-    };
-
-    /**
-     * @method auto_highlight
-     */
-    CodeCell.prototype.auto_highlight = function () {
-        this._auto_highlight(this.class_config.get_sync('cell_magic_highlight'));
-    };
-
     /** @method create_element */
     CodeCell.prototype.create_element = function () {
         Cell.prototype.create_element.apply(this, arguments);
+        var that = this;
 
         var cell =  $('<div></div>').addClass('cell code_cell');
         cell.attr('tabindex','2');
@@ -201,7 +164,14 @@ define([
         inner_cell.append(this.celltoolbar.element);
         var input_area = $('<div/>').addClass('input_area');
         this.code_mirror = new CodeMirror(input_area.get(0), this.cm_config);
-        this.code_mirror.on('keydown', $.proxy(this.handle_keyevent,this))
+        // In case of bugs that put the keyboard manager into an inconsistent state,
+        // ensure KM is enabled when CodeMirror is focused:
+        this.code_mirror.on('focus', function () {
+            if (that.keyboard_manager) {
+                that.keyboard_manager.enable();
+            }
+        });
+        this.code_mirror.on('keydown', $.proxy(this.handle_keyevent,this));
         $(this.code_mirror.getInputField()).attr("spellcheck", "false");
         inner_cell.append(input_area);
         input.append(prompt).append(inner_cell);
@@ -224,7 +194,12 @@ define([
             .click(function() {
                 widget_area.slideUp('', function(){ 
                     for (var i = 0; i < that.widget_views.length; i++) {
-                        that.widget_views[i].remove();
+                        var view = that.widget_views[i];
+                        view.remove();
+
+                        // Remove widget live events.
+                        view.off('comm:live', that._widget_live);
+                        view.off('comm:dead', that._widget_dead);
                     }
                     that.widget_views = [];
                     widget_subarea.html(''); 
@@ -258,8 +233,47 @@ define([
             that.widget_area.show();
             dummy.replaceWith(view.$el);
             that.widget_views.push(view);
+
+            // Check the live state of the view's model.
+            if (view.model.comm_live) {
+                that._widget_live(view);
+            } else {
+                that._widget_dead(view);
+            }
+
+            // Listen to comm live events for the view.
+            view.on('comm:live', that._widget_live, that);
+            view.on('comm:dead', that._widget_dead, that);
             return view;
         });
+    };
+
+    /**
+     * Handles when a widget loses it's comm connection.
+     * @param  {WidgetView} view
+     */
+    CodeCell.prototype._widget_dead = function(view) {
+        if (this._widgets_live) {
+            this._widgets_live = false;
+            this.widget_area.addClass('connection-problems');
+        }
+
+    };
+
+    /**
+     * Handles when a widget is connected to a live comm.
+     * @param  {WidgetView} view
+     */
+    CodeCell.prototype._widget_live = function(view) {
+        if (!this._widgets_live) {
+            // Check that the other widgets are live too.  O(N) operation.
+            // Abort the function at the first dead widget found.
+            for (var i = 0; i < this.widget_views.length; i++) {
+                if (!this.widget_views[i].model.comm_live) return;
+            }
+            this._widgets_live = true;
+            this.widget_area.removeClass('connection-problems');
+        }
     };
 
     /** @method bind_events */
@@ -287,7 +301,7 @@ define([
         // whatever key is pressed, first, cancel the tooltip request before
         // they are sent, and remove tooltip if any, except for tab again
         var tooltip_closed = null;
-        if (event.type === 'keydown' && event.which != keycodes.tab ) {
+        if (event.type === 'keydown' && event.which !== keycodes.tab ) {
             tooltip_closed = this.tooltip.remove_and_cancel_tooltip();
         }
 
@@ -315,21 +329,28 @@ define([
             // If we closed the tooltip, don't let CM or the global handlers
             // handle this event.
             event.codemirrorIgnore = true;
+            event._ipkmIgnore = true;
             event.preventDefault();
             return true;
         } else if (event.keyCode === keycodes.tab && event.type === 'keydown' && event.shiftKey) {
                 if (editor.somethingSelected() || editor.getSelections().length !== 1){
                     var anchor = editor.getCursor("anchor");
                     var head = editor.getCursor("head");
-                    if( anchor.line != head.line){
+                    if( anchor.line !== head.line){
                         return false;
                     }
                 }
+                var pre_cursor = editor.getRange({line:cur.line,ch:0},cur);
+                if (pre_cursor.trim() === "") {
+                    // Don't show tooltip if the part of the line before the cursor
+                    // is empty.  In this case, let CodeMirror handle indentation.
+                    return false;
+                } 
                 this.tooltip.request(that);
                 event.codemirrorIgnore = true;
                 event.preventDefault();
                 return true;
-        } else if (event.keyCode === keycodes.tab && event.type == 'keydown') {
+        } else if (event.keyCode === keycodes.tab && event.type === 'keydown') {
             // Tab completion.
             this.tooltip.remove_and_cancel_tooltip();
 
@@ -365,36 +386,52 @@ define([
      * Execute current code cell to the kernel
      * @method execute
      */
-    CodeCell.prototype.execute = function () {
+    CodeCell.prototype.execute = function (stop_on_error) {
         if (!this.kernel || !this.kernel.is_connected()) {
             console.log("Can't execute, kernel is not connected.");
             return;
         }
 
-        this.active_output_area.clear_output();
-        
+        this.output_area.clear_output(false, true);
+
+        if (stop_on_error === undefined) {
+            stop_on_error = true;
+        }
+
         // Clear widget area
         for (var i = 0; i < this.widget_views.length; i++) {
-            this.widget_views[i].remove();
+            var view = this.widget_views[i];
+            view.remove();
+
+            // Remove widget live events.
+            view.off('comm:live', this._widget_live);
+            view.off('comm:dead', this._widget_dead);
         }
         this.widget_views = [];
         this.widget_subarea.html('');
         this.widget_subarea.height('');
         this.widget_area.height('');
         this.widget_area.hide();
-
-        this.set_input_prompt('*');
-        this.element.addClass("running");
-        if (this.last_msg_id) {
-            this.kernel.clear_callbacks_for_msg(this.last_msg_id);
-        }
-        var callbacks = this.get_callbacks();
         
         var old_msg_id = this.last_msg_id;
-        this.last_msg_id = this.kernel.execute(this.get_text(), callbacks, {silent: false, store_history: true});
+
         if (old_msg_id) {
-            delete CodeCell.msg_cells[old_msg_id];
+            this.kernel.clear_callbacks_for_msg(old_msg_id);
+            if (old_msg_id) {
+                delete CodeCell.msg_cells[old_msg_id];
+            }
         }
+        if (this.get_text().trim().length === 0) {
+            // nothing to do
+            this.set_input_prompt(null);
+            return;
+        }
+        this.set_input_prompt('*');
+        this.element.addClass("running");
+        var callbacks = this.get_callbacks();
+        
+        this.last_msg_id = this.kernel.execute(this.get_text(), callbacks, {silent: false, store_history: true,
+            stop_on_error : stop_on_error});
         CodeCell.msg_cells[this.last_msg_id] = this;
         this.render();
         this.events.trigger('execute.CodeCell', {cell: this});
@@ -416,10 +453,10 @@ define([
             },
             iopub : {
                 output : function() { 
-                    that.active_output_area.handle_output.apply(that.active_output_area, arguments);
+                    that.output_area.handle_output.apply(that.output_area, arguments);
                 }, 
                 clear_output : function() { 
-                    that.active_output_area.handle_clear_output.apply(that.active_output_area, arguments);
+                    that.output_area.handle_clear_output.apply(that.output_area, arguments);
                 }, 
             },
             input : $.proxy(this._handle_input_request, this)
@@ -454,7 +491,7 @@ define([
      * @private
      */
     CodeCell.prototype._handle_input_request = function (msg) {
-        this.active_output_area.append_raw_input(msg);
+        this.output_area.append_raw_input(msg);
     };
 
 
@@ -557,7 +594,7 @@ define([
 
 
     CodeCell.prototype.clear_output = function (wait) {
-        this.active_output_area.clear_output(wait);
+        this.output_area.clear_output(wait);
         this.set_input_prompt();
     };
 
@@ -576,14 +613,7 @@ define([
             }
             this.set_input_prompt(data.execution_count);
             this.output_area.trusted = data.metadata.trusted || false;
-            this.output_area.fromJSON(data.outputs);
-            if (data.metadata.collapsed !== undefined) {
-                if (data.metadata.collapsed) {
-                    this.collapse_output();
-                } else {
-                    this.expand_output();
-                }
-            }
+            this.output_area.fromJSON(data.outputs, data.metadata);
         }
     };
 
@@ -601,6 +631,11 @@ define([
         data.outputs = outputs;
         data.metadata.trusted = this.output_area.trusted;
         data.metadata.collapsed = this.output_area.collapsed;
+        if (this.output_area.scroll_state === 'auto') {
+            delete data.metadata.scrolled;
+        } else {
+            data.metadata.scrolled = this.output_area.scroll_state;
+        }
         return data;
     };
 
